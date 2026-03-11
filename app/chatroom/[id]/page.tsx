@@ -21,7 +21,8 @@ import {
   Plus,
   MessageSquare,
   ImagePlus,
-  RefreshCw
+  RefreshCw,
+  Maximize2
 } from 'lucide-react';
 import Image from 'next/image';
 import ImageUploader from '@/components/ImageUploader';
@@ -111,11 +112,64 @@ export default function ChatUI() {
   const [newSpriteName, setNewSpriteName] = useState('');
   const [newSpriteUrl, setNewSpriteUrl] = useState('');
   const [isUploadingSprite, setIsUploadingSprite] = useState(false);
-  const [chatroomBgUrl, setChatroomBgUrl] = useState<string | null>(null);
+  
+  interface ChatroomResource {
+    id: string;
+    type: 'image' | 'text' | 'map';
+    title: string;
+    content: string;
+  }
+
+  interface ChatroomData {
+    id: string;
+    title: string;
+    description: string | null;
+    background_url?: string;
+    roleplay_type?: string;
+    resources?: ChatroomResource[];
+  }
+
+  const [chatroomData, setChatroomData] = useState<ChatroomData | null>(null);
 
   // Whisper / Target state
   const [chatters, setChatters] = useState<{id: string, username: string}[]>([]);
   const [selectedTargetUserId, setSelectedTargetUserId] = useState<string | null>(null);
+
+  // Resource State
+  const [isAddResourceModalOpen, setIsAddResourceModalOpen] = useState(false);
+  const [newResourceTitle, setNewResourceTitle] = useState('');
+  const [newResourceType, setNewResourceType] = useState<'image' | 'text' | 'map'>('image');
+  const [newResourceContent, setNewResourceContent] = useState('');
+  const [isUploadingResource, setIsUploadingResource] = useState(false);
+
+  const isMaster = myChatroomCharacters.some(c => c.name === 'TMC: Master');
+
+  const handleAddResource = async () => {
+    if (!chatroomData || !newResourceTitle || !newResourceContent) return;
+    setIsUploadingResource(true);
+    
+    const newResource: ChatroomResource = {
+      id: crypto.randomUUID(),
+      type: newResourceType,
+      title: newResourceTitle,
+      content: newResourceContent
+    };
+    
+    const updatedResources = [...(chatroomData.resources || []), newResource];
+    
+    const supabase = createClient();
+    const { error } = await supabase.from('chatrooms').update({ resources: updatedResources }).eq('id', chatroomData.id);
+    
+    if (!error) {
+      setChatroomData({ ...chatroomData, resources: updatedResources });
+      setIsAddResourceModalOpen(false);
+      setNewResourceTitle('');
+      setNewResourceContent('');
+    } else {
+      alert('Error guardando el recurso.');
+    }
+    setIsUploadingResource(false);
+  };
 
   const handleAddSprite = async () => {
     if (!activeChatroomCharacter?.vault_character_id || !newSpriteName || !newSpriteUrl) return;
@@ -201,12 +255,21 @@ export default function ChatUI() {
   useEffect(() => {
     if (user && id) {
       // Fetch specific chatroom data safely inline
-      const fetchBg = async () => {
+      const fetchChatroomData = async () => {
         const supabase = createClient();
-        const { data } = await supabase.from('chatrooms').select('background_url').eq('id', id).maybeSingle();
-        if (data?.background_url) setChatroomBgUrl(data.background_url);
+        const { data } = await supabase.from('chatrooms').select('*').eq('id', id).maybeSingle();
+        if (data) {
+          setChatroomData({
+            id: data.id,
+            title: data.title,
+            description: data.description,
+            background_url: data.background_url,
+            roleplay_type: data.roleplay_type,
+            resources: data.resources || []
+          });
+        }
       };
-      fetchBg();
+      fetchChatroomData();
 
       if (!activeSubscription) {
         subscribeToMessages(id as string, user.id);
@@ -438,10 +501,86 @@ export default function ChatUI() {
         </div>
       )}
 
+      {/* Add Resource Modal */}
+      {isAddResourceModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+           <div className="w-full max-w-md bg-[var(--surface)] border border-[var(--border)] rounded-sm shadow-2xl flex flex-col max-h-[90vh]">
+              <div className="p-5 border-b border-[var(--border)] flex justify-between items-center bg-[var(--surface-alt)]">
+                <h2 className="text-xs font-bold text-[var(--text)] tracking-widest uppercase">Añadir Recurso</h2>
+                <button onClick={() => setIsAddResourceModalOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text)]">
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="p-6 space-y-4 overflow-y-auto custom-scrollbar">
+                 <div>
+                   <label className="block font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)] mb-2">Tipo de Recurso</label>
+                   <select 
+                     value={newResourceType}
+                     onChange={(e: any) => setNewResourceType(e.target.value)}
+                     className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-sans text-sm rounded-sm p-2.5 outline-none focus:border-[var(--glow)]/50 transition-colors"
+                   >
+                     <option value="image">Imagen General</option>
+                     <option value="map">Mapa / Plano</option>
+                     <option value="text">Nota / Texto</option>
+                   </select>
+                 </div>
+                 <div>
+                   <label className="block font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)] mb-2">Título</label>
+                   <input 
+                     type="text" 
+                     value={newResourceTitle}
+                     onChange={e => setNewResourceTitle(e.target.value)}
+                     placeholder="Ej: Mapa del Sector 7"
+                     className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-sans text-sm rounded-sm p-2.5 outline-none focus:border-[var(--glow)]/50 transition-colors"
+                   />
+                 </div>
+                 
+                 {newResourceType === 'text' ? (
+                   <div>
+                     <label className="block font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)] mb-2">Contenido de la Nota</label>
+                     <textarea 
+                       value={newResourceContent}
+                       onChange={e => setNewResourceContent(e.target.value)}
+                       placeholder="Escribe la descripción o notas aquí..."
+                       className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-sans text-sm rounded-sm p-2.5 outline-none focus:border-[var(--glow)]/50 transition-colors min-h-[120px]"
+                     />
+                   </div>
+                 ) : (
+                   <div className="mb-2">
+                     <ImageUploader 
+                       value={newResourceContent} 
+                       onChange={setNewResourceContent} 
+                       label="Subir Imagen/Mapa (URL o Archivo)"
+                       bucket="chatroom_images"
+                     />
+                   </div>
+                 )}
+                 <div className="pt-2 flex justify-end gap-3">
+                   <button 
+                     type="button" 
+                     onClick={() => setIsAddResourceModalOpen(false)}
+                     className="px-4 py-2 border border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--text)] rounded-sm text-[10px] font-bold uppercase tracking-widest transition-colors"
+                   >
+                     Cancelar
+                   </button>
+                   <button 
+                     type="button" 
+                     onClick={handleAddResource}
+                     disabled={isUploadingResource || !newResourceTitle || !newResourceContent}
+                     className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-sm text-[10px] font-bold uppercase tracking-widest transition-all shadow-[0_0_10px_rgba(59,130,246,0.3)]"
+                   >
+                     {isUploadingResource ? 'Guardando...' : 'Confirmar'}
+                   </button>
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
+
       {/* Background Image & Pattern */}
-      {chatroomBgUrl && (
+      {chatroomData?.background_url && (
           <div className="absolute inset-0 z-0 opacity-30 grayscale-[50%]">
-             <Image src={chatroomBgUrl} alt="Room Background" fill className="object-cover" />
+             <Image src={chatroomData.background_url} alt="Room Background" fill className="object-cover" />
           </div>
       )}
       <div className="absolute inset-0 pointer-events-none z-0 grid-overlay"></div>
@@ -457,9 +596,9 @@ export default function ChatUI() {
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[9px] font-mono text-[var(--glow)]">◆</span>
-              <h1 className="text-xs font-bold tracking-[0.15em] text-[var(--text)] uppercase">Operación: Sombra Azul</h1>
+              <h1 className="text-xs font-bold tracking-[0.15em] text-[var(--text)] uppercase line-clamp-1">{chatroomData?.title || 'Cargando...'}</h1>
             </div>
-            <div className="mono-label mt-0.5 ml-4">ID: #8X-2921-ALPHA</div>
+            <div className="mono-label mt-0.5 ml-4">ID: {typeof id === 'string' ? id.split('-')[0].toUpperCase() : ''}</div>
           </div>
         </div>
         <button 
@@ -475,16 +614,26 @@ export default function ChatUI() {
         
         {/* Center Area (Visual Novel & Background) */}
         <div className="flex-1 relative flex flex-col overflow-hidden">
-          {/* Background Image */}
+          {/* Background Gradient */}
           <div className="absolute inset-0 z-0">
-            <Image src="https://picsum.photos/seed/cyberpunk/1920/1080" alt="Background" fill className="object-cover opacity-20" />
             <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg)] via-transparent to-transparent"></div>
           </div>
 
           {/* Top Right: Mode Indicator */}
-          <div className="absolute top-6 right-6 z-20 flex items-center gap-2 bg-[var(--surface)]/80 border border-[var(--border)] backdrop-blur-md px-4 py-2 rounded-sm shadow-lg">
-            <Clock size={12} className="text-[var(--glow)]" />
-            <span className="text-[10px] font-bold tracking-widest text-[var(--text)] uppercase">Roleplay por Turnos</span>
+          <div className="absolute top-6 right-6 z-20 flex flex-col items-end gap-2">
+            <div className="flex items-center gap-2 bg-[var(--surface)]/80 border border-[var(--border)] backdrop-blur-md px-4 py-2 rounded-sm shadow-lg">
+              <Clock size={12} className="text-[var(--glow)]" />
+              <span className="text-[10px] font-bold tracking-widest text-[var(--text)] uppercase">
+                {chatroomData?.roleplay_type === 'combat' ? 'Modo Combate' 
+                : chatroomData?.roleplay_type === 'turn_based' ? 'Roleplay por Turnos' 
+                : 'Roleplay Libre'}
+              </span>
+            </div>
+            {chatroomData?.description && (
+              <div className="bg-[var(--surface)]/80 border border-[var(--border)] backdrop-blur-md px-4 py-3 rounded-sm shadow-lg max-w-sm">
+                <p className="text-[11px] font-sans text-[var(--text-muted)] italic leading-relaxed">&quot;{chatroomData.description}&quot;</p>
+              </div>
+            )}
           </div>
 
 
@@ -616,37 +765,53 @@ export default function ChatUI() {
                 <FolderOpen size={14} />
                 <h2 className="text-[10px] font-bold tracking-widest uppercase text-[var(--text)]">Recursos & Mapas</h2>
               </div>
-              <button onClick={() => setIsResourcesOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text)]">
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-3">
+                {isMaster && (
+                  <button onClick={() => setIsAddResourceModalOpen(true)} className="text-[var(--glow)] hover:text-white bg-[var(--glow)]/10 p-1 rounded-sm" title="Añadir Recurso">
+                    <Plus size={14} />
+                  </button>
+                )}
+                <button onClick={() => setIsResourcesOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text)]">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-8 custom-scrollbar">
-              {/* Map */}
-              <div className="space-y-3">
-                <div className="relative w-full h-40 rounded-sm overflow-hidden border border-[var(--border)]">
-                  <Image src="https://picsum.photos/seed/space/600/400" alt="Map" fill className="object-cover grayscale hover:grayscale-0 transition-all" />
+              {chatroomData?.resources?.filter(r => r.type === 'map' || r.type === 'image').length ? (
+                <div className="space-y-4">
+                  <h3 className="mono-label mb-2">Imágenes y Mapas</h3>
+                  {chatroomData.resources.filter(r => r.type === 'map' || r.type === 'image').map(r => (
+                    <div key={r.id} className="space-y-2">
+                       <div className="relative w-full h-40 rounded-sm overflow-hidden border border-[var(--border)]">
+                         <Image src={r.content} alt={r.title} fill className="object-cover transition-all grayscale hover:grayscale-0" />
+                       </div>
+                       <div className="flex justify-between items-center">
+                         <h3 className="mono-label text-[var(--text)]">{r.title}</h3>
+                         {r.type === 'map' && <Map size={14} className="text-[var(--glow)] mr-2" />}
+                         <a href={r.content} target="_blank" rel="noreferrer" className="text-[var(--glow)] hover:text-white transition-colors bg-[var(--glow)]/10 p-1.5 rounded-sm">
+                           <Maximize2 size={12} />
+                         </a>
+                       </div>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex justify-between items-center">
-                  <h3 className="mono-label text-[var(--text)]">Mapa del Sector 7</h3>
-                  <Map size={14} className="text-[var(--glow)]" />
-                </div>
-              </div>
-              
-              {/* Master Note */}
-              <div className="bg-[var(--accent)]/10 border-l-2 border-[var(--accent)] p-4 rounded-r-sm">
-                <h4 className="mono-label text-[var(--glow)] mb-2">Nota del Master:</h4>
-                <p className="text-xs text-[var(--text)] italic font-mono leading-relaxed">&quot;Las terminales Alpha solo pueden ser hackeadas si el sistema de refrigeración está desactivado.&quot;</p>
-              </div>
+              ) : null}
 
-              {/* Pinned Docs */}
-              <div>
-                <h3 className="mono-label mb-4">Documentos Fijados</h3>
-                <div className="space-y-2">
-                  <DocItem title="Protocolos de Incendio" />
-                  <DocItem title="Esquema de Conductos" />
-                  <DocItem title="Fichas de Enemigos" />
+              {chatroomData?.resources?.filter(r => r.type === 'text').length ? (
+                <div className="space-y-4">
+                  <h3 className="mono-label mb-2">Notas y Documentos</h3>
+                  {chatroomData.resources.filter(r => r.type === 'text').map(r => (
+                    <div key={r.id} className="bg-[var(--accent)]/10 border-l-2 border-[var(--accent)] p-4 rounded-r-sm space-y-2 relative group">
+                       <h4 className="mono-label text-[var(--glow)]">{r.title}</h4>
+                       <p className="text-xs text-[var(--text)] font-sans leading-relaxed whitespace-pre-wrap">{r.content}</p>
+                    </div>
+                  ))}
                 </div>
-              </div>
+              ) : null}
+              
+              {(!chatroomData?.resources || chatroomData.resources.length === 0) && (
+                <div className="text-center text-[var(--text-muted)] text-xs font-mono uppercase tracking-widest mt-10">Sin Recursos</div>
+              )}
             </div>
           </div>
 
