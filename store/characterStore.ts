@@ -34,6 +34,8 @@ export interface CharacterSprite {
   name: string;
   image_url: string;
   tag: string | null;
+  scale?: number;
+  position_y?: number;
 }
 
 interface CharacterState {
@@ -49,6 +51,8 @@ interface CharacterState {
   leaveChatroom: (chatroomId: string, userId: string) => Promise<boolean>;
   setActiveCharacter: (charId: string) => void;
   addSprite: (vaultCharId: string, name: string, imageUrl: string) => Promise<boolean>;
+  updateSprite: (spriteId: string, updates: Partial<CharacterSprite>) => Promise<boolean>;
+  deleteSprite: (spriteId: string) => Promise<boolean>;
   updateCharacterStatus: (charId: string, hp: number, mana: number) => Promise<boolean>;
   syncCharacterStats: (charId: string, vaultCharId: string) => Promise<boolean>;
 }
@@ -339,6 +343,30 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
        return true;
     }
     console.error('Error adding sprite:', error);
+    return false;
+  },
+  updateSprite: async (spriteId: string, updates: Partial<CharacterSprite>) => {
+    const supabase = createClient();
+    const { error } = await supabase.from('character_sprites').update(updates).eq('id', spriteId);
+    if (!error) {
+      set(state => ({
+        activeCharacterSprites: state.activeCharacterSprites.map(s => s.id === spriteId ? { ...s, ...updates } : s)
+      }));
+      return true;
+    }
+    console.error('Error updating sprite:', error);
+    return false;
+  },
+  deleteSprite: async (spriteId: string) => {
+    const supabase = createClient();
+    const { error } = await supabase.from('character_sprites').delete().eq('id', spriteId);
+    if (!error) {
+       set(state => ({
+         activeCharacterSprites: state.activeCharacterSprites.filter(s => s.id !== spriteId)
+       }));
+       return true;
+    }
+    console.error('Error deleting sprite:', error);
     return false;
   }
 }));

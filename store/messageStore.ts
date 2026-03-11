@@ -17,7 +17,7 @@ export interface MessageRecord {
   
   // Joined relations (optional, depends on query)
   chatroom_characters?: { name: string; advantage_status: string };
-  character_sprites?: { name: string; image_url: string };
+  character_sprites?: { name: string; image_url: string; scale?: number; position_y?: number };
   profiles?: { username: string; role: string };
   target_profile?: { username: string };
 }
@@ -25,9 +25,12 @@ export interface MessageRecord {
 interface MessageState {
   messages: MessageRecord[];
   isLoading: boolean;
+  isLoadingMore: boolean;
+  hasMoreMessages: boolean;
   activeSubscription: RealtimeChannel | null;
   
   fetchMessages: (chatroomId: string, currentUserId: string) => Promise<void>;
+  loadMoreMessages: (chatroomId: string, currentUserId: string) => Promise<void>;
   sendMessage: (payload: Partial<MessageRecord>) => Promise<boolean>;
   subscribeToMessages: (chatroomId: string, currentUserId: string) => void;
   unsubscribeFromMessages: () => void;
@@ -36,13 +39,49 @@ interface MessageState {
 export const useMessageStore = create<MessageState>((set, get) => ({
   messages: [],
   isLoading: true,
+  isLoadingMore: false,
+  hasMoreMessages: true,
   activeSubscription: null,
 
   fetchMessages: async (chatroomId: string, currentUserId: string) => {
-    set({ isLoading: true });
+    set({ isLoading: true, hasMoreMessages: true, messages: [] });
     const supabase = createClient();
     
     // Fetch last 50 messages, including character and user details
+    const { data, error } = await supabase
+      .from('messages')
+      .select(`
+        *,
+        chatroom_characters ( name, advantage_status ),
+        character_sprites ( name, image_url, scale, position_y ),
+        profiles:sender_id ( username, role ),
+        target_profile:target_user_id ( username )
+      `)
+      .eq('chatroom_id', chatroomId)
+      .or(`target_user_id.is.null,target_user_id.eq.${currentUserId},sender_id.eq.${currentUserId}`)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (!error && data) {
+      set({ 
+        messages: data.reverse() as unknown as MessageRecord[], 
+        isLoading: false,
+        hasMoreMessages: data.length === 50
+      });
+    } else {
+      console.error('Error fetching messages:', error);
+      set({ isLoading: false });
+    }
+  },
+
+  loadMoreMessages: async (chatroomId: string, currentUserId: string) => {
+    const { messages, isLoadingMore, hasMoreMessages } = get();
+    if (isLoadingMore || !hasMoreMessages || messages.length === 0) return;
+
+    set({ isLoadingMore: true });
+    const supabase = createClient();
+    const oldestMessageAt = messages[0].created_at;
+    
     const { data, error } = await supabase
       .from('messages')
       .select(`
@@ -53,15 +92,20 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         target_profile:target_user_id ( username )
       `)
       .eq('chatroom_id', chatroomId)
+      .lt('created_at', oldestMessageAt)
       .or(`target_user_id.is.null,target_user_id.eq.${currentUserId},sender_id.eq.${currentUserId}`)
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: false })
       .limit(50);
 
     if (!error && data) {
-      set({ messages: data as unknown as MessageRecord[], isLoading: false });
+      set((state) => ({ 
+        messages: [...(data.reverse() as unknown as MessageRecord[]), ...state.messages],
+        isLoadingMore: false,
+        hasMoreMessages: data.length === 50
+      }));
     } else {
-      console.error('Error fetching messages:', error);
-      set({ isLoading: false });
+      console.error('Error loading more messages:', error);
+      set({ isLoadingMore: false });
     }
   },
 
@@ -105,7 +149,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
               .select(`
                 *,
                 chatroom_characters ( name, advantage_status ),
-                character_sprites ( name, image_url ),
+                character_sprites ( name, image_url, scale, position_y ),
                 profiles:sender_id ( username, role ),
                 target_profile:target_user_id ( username )
               `)

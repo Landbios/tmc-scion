@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuthStore } from '@/store/authStore';
-import { useCharacterStore } from '@/store/characterStore';
+import { useCharacterStore, CharacterSprite } from '@/store/characterStore';
 import { useMessageStore } from '@/store/messageStore';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -22,7 +22,9 @@ import {
   MessageSquare,
   ImagePlus,
   RefreshCw,
-  Maximize2
+  Maximize2,
+  Trash2,
+  Pencil
 } from 'lucide-react';
 import Image from 'next/image';
 import ImageUploader from '@/components/ImageUploader';
@@ -79,24 +81,38 @@ const DocItem = ({ title }: { title: string }) => (
 
 // --- Main Component ---
 
-export default function ChatUI() {
-  const { id } = useParams();
+export default function ChatroomPage() {
   const router = useRouter();
-  const { user } = useAuthStore();
-  const { 
-    checkJoinedStatus, 
-    activeChatroomCharacter, 
-    myChatroomCharacters,
-    setActiveCharacter,
-    activeCharacterSprites,
-    isLoading: isCharLoading, 
-    vaultCharacters, 
-    fetchVaultCharacters, 
-    joinChatroom,
-    leaveChatroom,
-    updateCharacterStatus,
-    syncCharacterStats
-  } = useCharacterStore();
+  const params = useParams();
+  const id = params?.id;
+
+  const user = useAuthStore(state => state.user);
+  const profile = useAuthStore(state => state.profile);
+
+  const myChatroomCharacters = useCharacterStore(state => state.myChatroomCharacters);
+  const activeChatroomCharacter = useCharacterStore(state => state.activeChatroomCharacter);
+  const activeCharacterSprites = useCharacterStore(state => state.activeCharacterSprites);
+  const vaultCharacters = useCharacterStore(state => state.vaultCharacters);
+  const isCharLoading = useCharacterStore(state => state.isLoading);
+  const checkJoinedStatus = useCharacterStore(state => state.checkJoinedStatus);
+  const joinChatroom = useCharacterStore(state => state.joinChatroom);
+  const leaveChatroom = useCharacterStore(state => state.leaveChatroom);
+  const fetchVaultCharacters = useCharacterStore(state => state.fetchVaultCharacters);
+  const setActiveCharacter = useCharacterStore(state => state.setActiveCharacter);
+  const updateCharacterStatus = useCharacterStore(state => state.updateCharacterStatus);
+  const addSprite = useCharacterStore(state => state.addSprite);
+  const updateSprite = useCharacterStore(state => state.updateSprite);
+  const deleteSprite = useCharacterStore(state => state.deleteSprite);
+  const syncCharacterStats = useCharacterStore(state => state.syncCharacterStats);
+  const authLoading = useAuthStore(state => state.isLoading);
+
+  // Auth Protection Redirect
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/');
+    }
+  }, [user, authLoading, router]);
+
   const [isChecking, setIsChecking] = useState(true);
 
   const [isTurnOrderOpen, setIsTurnOrderOpen] = useState(false);
@@ -104,20 +120,54 @@ export default function ChatUI() {
   const [isRoomDetailsOpen, setIsRoomDetailsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isAddCharacterModalOpen, setIsAddCharacterModalOpen] = useState(false);
-  const [isAddSpriteModalOpen, setIsAddSpriteModalOpen] = useState(false);
+  const [isSpriteModalOpen, setIsSpriteModalOpen] = useState(false);
+  const [editingSpriteId, setEditingSpriteId] = useState<string | null>(null);
   const [isEditStatusModalOpen, setIsEditStatusModalOpen] = useState(false);
   const [editHp, setEditHp] = useState(0);
   const [editMana, setEditMana] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [newSpriteName, setNewSpriteName] = useState('');
   const [newSpriteUrl, setNewSpriteUrl] = useState('');
+  const [newSpriteScale, setNewSpriteScale] = useState(1.0);
+  const [newSpritePositionY, setNewSpritePositionY] = useState(0.0);
   const [isUploadingSprite, setIsUploadingSprite] = useState(false);
   
   interface ChatroomResource {
     id: string;
-    type: 'image' | 'text' | 'map';
+    type: 'image' | 'text' | 'map' | 'enemy' | 'item';
     title: string;
-    content: string;
+    content: string; // Description or main content/URL
+    image_url?: string;
+    
+    // For Enemy
+    hp?: number;
+    mana?: number;
+    offensive_power?: string;
+    defensive_power?: string;
+    physical_ability?: string;
+    luck?: string;
+    creator?: string; // mapped to "user"
+    blaze?: string;
+    advanced_element?: string;
+    
+    // For Item
+    item_type?: string;
+    stats?: string;
+    effect?: string;
+  }
+
+  interface TurnCharacter {
+    character_id: string;
+    name: string;
+    initiative: number;
+  }
+
+  interface TurnGroup {
+    id: string;
+    name: string;
+    deadline_text?: string;
+    active_character_id: string | null;
+    characters: TurnCharacter[];
   }
 
   interface ChatroomData {
@@ -127,6 +177,7 @@ export default function ChatUI() {
     background_url?: string;
     roleplay_type?: string;
     resources?: ChatroomResource[];
+    turns?: TurnGroup[];
   }
 
   const [chatroomData, setChatroomData] = useState<ChatroomData | null>(null);
@@ -138,21 +189,69 @@ export default function ChatUI() {
   // Resource State
   const [isAddResourceModalOpen, setIsAddResourceModalOpen] = useState(false);
   const [newResourceTitle, setNewResourceTitle] = useState('');
-  const [newResourceType, setNewResourceType] = useState<'image' | 'text' | 'map'>('image');
+  const [newResourceType, setNewResourceType] = useState<'image' | 'text' | 'map' | 'enemy' | 'item'>('image');
   const [newResourceContent, setNewResourceContent] = useState('');
+  const [newResourceImageUrl, setNewResourceImageUrl] = useState('');
+  const [newResourceHp, setNewResourceHp] = useState(0);
+  const [newResourceMana, setNewResourceMana] = useState(0);
+  const [newResourceOffensive, setNewResourceOffensive] = useState('');
+  const [newResourceDefensive, setNewResourceDefensive] = useState('');
+  const [newResourcePhysical, setNewResourcePhysical] = useState('');
+  const [newResourceLuck, setNewResourceLuck] = useState('');
+  const [newResourceCreator, setNewResourceCreator] = useState('');
+  const [newResourceBlaze, setNewResourceBlaze] = useState('');
+  const [newResourceElement, setNewResourceElement] = useState('');
+  const [newResourceItemType, setNewResourceItemType] = useState('');
+  const [newResourceStats, setNewResourceStats] = useState('');
+  const [newResourceEffect, setNewResourceEffect] = useState('');
   const [isUploadingResource, setIsUploadingResource] = useState(false);
+
+  // Turns State
+  const [isManageTurnsModalOpen, setIsManageTurnsModalOpen] = useState(false);
+  const [availableRoomCharacters, setAvailableRoomCharacters] = useState<{id: string, name: string}[]>([]);
+  const [editableTurns, setEditableTurns] = useState<TurnGroup[]>([]);
+
+  const handleOpenManageTurns = () => {
+    if (chatroomData) {
+      setEditableTurns(chatroomData.turns ? JSON.parse(JSON.stringify(chatroomData.turns)) : []);
+    }
+    const fetchChars = async () => {
+      const supabase = createClient();
+      const { data } = await supabase.from('chatroom_characters').select('id, name').eq('chatroom_id', id);
+      if (data) setAvailableRoomCharacters(data);
+    };
+    fetchChars();
+    setIsManageTurnsModalOpen(true);
+  };
 
   const isMaster = myChatroomCharacters.some(c => c.name === 'TMC: Master');
 
   const handleAddResource = async () => {
-    if (!chatroomData || !newResourceTitle || !newResourceContent) return;
+    if (!chatroomData || !newResourceTitle) return;
     setIsUploadingResource(true);
     
     const newResource: ChatroomResource = {
       id: crypto.randomUUID(),
       type: newResourceType,
       title: newResourceTitle,
-      content: newResourceContent
+      content: newResourceContent,
+      image_url: newResourceImageUrl,
+      ...(newResourceType === 'enemy' ? {
+         hp: newResourceHp,
+         mana: newResourceMana,
+         offensive_power: newResourceOffensive,
+         defensive_power: newResourceDefensive,
+         physical_ability: newResourcePhysical,
+         luck: newResourceLuck,
+         creator: newResourceCreator,
+         blaze: newResourceBlaze,
+         advanced_element: newResourceElement
+      } : {}),
+      ...(newResourceType === 'item' ? {
+         item_type: newResourceItemType,
+         stats: newResourceStats,
+         effect: newResourceEffect
+      } : {})
     };
     
     const updatedResources = [...(chatroomData.resources || []), newResource];
@@ -163,32 +262,91 @@ export default function ChatUI() {
     if (!error) {
       setChatroomData({ ...chatroomData, resources: updatedResources });
       setIsAddResourceModalOpen(false);
+      
+      // Reset states
       setNewResourceTitle('');
       setNewResourceContent('');
+      setNewResourceImageUrl('');
+      setNewResourceHp(0);
+      setNewResourceMana(0);
+      setNewResourceOffensive('');
+      setNewResourceDefensive('');
+      setNewResourcePhysical('');
+      setNewResourceLuck('');
+      setNewResourceCreator('');
+      setNewResourceBlaze('');
+      setNewResourceElement('');
+      setNewResourceItemType('');
+      setNewResourceStats('');
+      setNewResourceEffect('');
     } else {
       alert('Error guardando el recurso.');
     }
     setIsUploadingResource(false);
   };
 
-  const handleAddSprite = async () => {
+  const handleSaveSprite = async () => {
     if (!activeChatroomCharacter?.vault_character_id || !newSpriteName || !newSpriteUrl) return;
     setIsUploadingSprite(true);
-    const success = await useCharacterStore.getState().addSprite(activeChatroomCharacter.vault_character_id, newSpriteName, newSpriteUrl);
+    
+    let success = false;
+    if (editingSpriteId) {
+      success = await useCharacterStore.getState().updateSprite(editingSpriteId, {
+        name: newSpriteName,
+        image_url: newSpriteUrl,
+        scale: newSpriteScale,
+        position_y: newSpritePositionY
+      });
+    } else {
+      success = await useCharacterStore.getState().addSprite(activeChatroomCharacter.vault_character_id, newSpriteName, newSpriteUrl);
+    }
+
     if (success) {
-      setIsAddSpriteModalOpen(false);
+      setIsSpriteModalOpen(false);
       setNewSpriteName('');
       setNewSpriteUrl('');
+      setNewSpriteScale(1.0);
+      setNewSpritePositionY(0.0);
+      setEditingSpriteId(null);
       
-      // Auto-select the newly added sprite by fetching the latest sprites and selecting the newest one
-      setTimeout(() => {
-        const sprites = useCharacterStore.getState().activeCharacterSprites;
-        if (sprites.length > 0) {
-           setSelectedSpriteId(sprites[sprites.length - 1].id);
-        }
-      }, 500);
+      // Auto-select the newly added sprite if adding
+      if (!editingSpriteId) {
+        setTimeout(() => {
+          const sprites = useCharacterStore.getState().activeCharacterSprites;
+          if (sprites.length > 0) {
+             setSelectedSpriteId(sprites[sprites.length - 1].id);
+          }
+        }, 500);
+      }
+    } else {
+      alert("Error al guardar el sprite.");
     }
     setIsUploadingSprite(false);
+  };
+
+  const handleDeleteSprite = async (spriteId: string) => {
+    if (confirm("¿Seguro que deseas eliminar este sprite?")) {
+       await useCharacterStore.getState().deleteSprite(spriteId);
+       if (selectedSpriteId === spriteId) setSelectedSpriteId(null);
+    }
+  };
+
+  const openEditSprite = (sprite: CharacterSprite) => {
+    setEditingSpriteId(sprite.id);
+    setNewSpriteName(sprite.name);
+    setNewSpriteUrl(sprite.image_url);
+    setNewSpriteScale(sprite.scale ?? 1.0);
+    setNewSpritePositionY(sprite.position_y ?? 0.0);
+    setIsSpriteModalOpen(true);
+  };
+
+  const openAddSprite = () => {
+    setEditingSpriteId(null);
+    setNewSpriteName('');
+    setNewSpriteUrl('');
+    setNewSpriteScale(1.0);
+    setNewSpritePositionY(0.0);
+    setIsSpriteModalOpen(true);
   };
 
   const handleOpenEditStatus = () => {
@@ -226,14 +384,15 @@ export default function ChatUI() {
     setIsSyncing(false);
   };
 
-  const { 
-    messages, 
-    fetchMessages, 
-    subscribeToMessages, 
-    unsubscribeFromMessages, 
-    sendMessage,
-    activeSubscription
-  } = useMessageStore();
+  const messages = useMessageStore(state => state.messages);
+  const fetchMessages = useMessageStore(state => state.fetchMessages);
+  const loadMoreMessages = useMessageStore(state => state.loadMoreMessages);
+  const hasMoreMessages = useMessageStore(state => state.hasMoreMessages);
+  const isLoadingMore = useMessageStore(state => state.isLoadingMore);
+  const subscribeToMessages = useMessageStore(state => state.subscribeToMessages);
+  const unsubscribeFromMessages = useMessageStore(state => state.unsubscribeFromMessages);
+  const sendMessage = useMessageStore(state => state.sendMessage);
+  const activeSubscription = useMessageStore(state => state.activeSubscription);
 
   const [messageInput, setMessageInput] = useState('');
   const [selectedSpriteId, setSelectedSpriteId] = useState<string | null>(null);
@@ -252,51 +411,100 @@ export default function ChatUI() {
     }
   }, [activeCharacterSprites, selectedSpriteId]);
 
+  // Chatroom Setup & Data Sync
   useEffect(() => {
-    if (user && id) {
-      // Fetch specific chatroom data safely inline
-      const fetchChatroomData = async () => {
-        const supabase = createClient();
-        const { data } = await supabase.from('chatrooms').select('*').eq('id', id).maybeSingle();
-        if (data) {
-          setChatroomData({
-            id: data.id,
-            title: data.title,
-            description: data.description,
-            background_url: data.background_url,
-            roleplay_type: data.roleplay_type,
-            resources: data.resources || []
-          });
-        }
-      };
-      fetchChatroomData();
+    if (!user || !id) return;
+    let isMounted = true;
+    const supabase = createClient();
 
-      if (!activeSubscription) {
+    // Fetch specific chatroom data safely inline
+    const fetchChatroomData = async () => {
+      const { data } = await supabase.from('chatrooms').select('*').eq('id', id).maybeSingle();
+      if (data && isMounted) {
+        setChatroomData({
+          id: data.id,
+          title: data.title,
+          description: data.description,
+          background_url: data.background_url,
+          roleplay_type: data.roleplay_type,
+          resources: data.resources || [],
+          turns: data.turns || []
+        });
+      }
+    };
+    fetchChatroomData();
+
+    // Fetch chatters for whisper targeting
+    const fetchChattersForMaster = async () => {
+      const { data } = await supabase.from('chatrooms').select('chatters_ids').eq('id', id).single();
+      if(data && data.chatters_ids && data.chatters_ids.length > 0) {
+         const { data: users } = await supabase.from('profiles').select('id, username').in('id', data.chatters_ids);
+         if(users && isMounted) setChatters(users);
+      }
+    };
+    fetchChattersForMaster();
+
+    // Setup realtime subscription for resources and turns
+    const subscription = supabase
+      .channel(`chatroom-${id}-data`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'chatrooms',
+          filter: `id=eq.${id}`,
+        },
+        (payload) => {
+          if (isMounted && payload.new) {
+            setChatroomData({
+              id: payload.new.id,
+              title: payload.new.title,
+              description: payload.new.description,
+              background_url: payload.new.background_url,
+              roleplay_type: payload.new.roleplay_type,
+              resources: payload.new.resources || [],
+              turns: payload.new.turns || []
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(subscription);
+    };
+  }, [id, user]);
+
+  // Initial Join Check & Messages Subscription
+  useEffect(() => {
+    if (!user || !id) return;
+    let isMounted = true;
+
+    const initRoom = async () => {
+      if (!useMessageStore.getState().activeSubscription) {
         subscribeToMessages(id as string, user.id);
         fetchMessages(id as string, user.id);
       }
 
-      const verifyJoin = async () => {
-        const hasJoined = await checkJoinedStatus(id as string, user.id);
-        if (!hasJoined) {
-          if (vaultCharacters.length === 0) fetchVaultCharacters(user.id);
+      const hasJoined = await checkJoinedStatus(id as string, user.id);
+      if (!hasJoined && isMounted) {
+        // Use getState to check if we already have vault characters to avoid unnecessary fetches
+        if (useCharacterStore.getState().vaultCharacters.length === 0) {
+          await fetchVaultCharacters(user.id);
         }
-        setIsChecking(false);
-      };
-      verifyJoin();
+      }
+      
+      if (isMounted) setIsChecking(false);
+    };
 
-      // Fetch chatters for whisper targeting
-      const fetchChattersForMaster = async () => {
-        const supabase = createClient();
-        const { data } = await supabase.from('chatrooms').select('chatters_ids').eq('id', id).single();
-        if(data && data.chatters_ids && data.chatters_ids.length > 0) {
-           const { data: users } = await supabase.from('profiles').select('id, username').in('id', data.chatters_ids);
-           if(users) setChatters(users);
-        }
-      };
-      fetchChattersForMaster();
-    }
-  }, [id, user, subscribeToMessages, fetchMessages, checkJoinedStatus, activeSubscription, fetchVaultCharacters, vaultCharacters.length]);
+    initRoom();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [id, user, subscribeToMessages, fetchMessages, checkJoinedStatus, fetchVaultCharacters]);
 
   // When successfully joined from the modal, we must sub and fetch
   const handleJoin = async (char: any) => {
@@ -372,7 +580,60 @@ export default function ChatUI() {
     });
   };
 
-  if (isChecking || isCharLoading) {
+  const handleSaveTurns = async () => {
+    if (!chatroomData) return;
+    const supabase = createClient();
+    const { error } = await supabase.from('chatrooms').update({ turns: editableTurns }).eq('id', chatroomData.id);
+    if (!error) {
+       setChatroomData({ ...chatroomData, turns: editableTurns });
+       setIsManageTurnsModalOpen(false);
+    } else {
+       alert("Error al guardar turnos.");
+    }
+  };
+
+  const handleAddTurnGroup = () => {
+    setEditableTurns([...editableTurns, { id: crypto.randomUUID(), name: `Grupo ${editableTurns.length + 1}`, active_character_id: null, characters: [] }]);
+  };
+
+  const handlePassTurn = async () => {
+    if (!activeChatroomCharacter || !chatroomData?.turns) return;
+    
+    let modified = false;
+    const newTurns = JSON.parse(JSON.stringify(chatroomData.turns)) as TurnGroup[];
+    
+    for (const group of newTurns) {
+       if (group.active_character_id === activeChatroomCharacter.id) {
+          const chars = group.characters;
+          const myIndex = chars.findIndex(c => c.character_id === activeChatroomCharacter.id);
+          if (myIndex !== -1) {
+             const nextIndex = (myIndex + 1) % chars.length;
+             group.active_character_id = chars[nextIndex].character_id;
+             modified = true;
+          }
+       }
+    }
+
+    if (modified) {
+       const supabase = createClient();
+       const { error } = await supabase.from('chatrooms').update({ turns: newTurns }).eq('id', chatroomData.id);
+       if (!error) {
+          setChatroomData({ ...chatroomData, turns: newTurns });
+          
+          await sendMessage({
+            chatroom_id: id as string,
+            sender_id: user?.id || '',
+            character_id: activeChatroomCharacter.id,
+            content: `${activeChatroomCharacter.name} ha cedido el turno.`,
+            is_system_message: true
+          });
+       }
+    }
+  };
+
+  // Only block the entire page on initial auth & room checking.
+  // Any character loading later on (like joining) shouldn't completely unmount the page.
+  if (isChecking || authLoading || !user) {
      return <div className="h-screen w-full flex items-center justify-center bg-[var(--bg)]"><div className="text-[var(--glow)] animate-pulse font-mono uppercase tracking-widest text-sm text-glow">CONECTANDO A SALA...</div></div>;
   }
 
@@ -388,7 +649,11 @@ export default function ChatUI() {
          <h1 className="text-3xl font-serif italic text-[var(--text)] mb-2">Seleccionar Agente</h1>
          <p className="text-[var(--text-muted)] font-mono text-sm mb-12">Elige tu personaje para esta operación</p>
          
-         {vaultCharacters.length === 0 ? (
+         {isCharLoading ? (
+            <div className="text-center p-8 bg-[var(--surface-alt)]/50 max-w-md animate-pulse">
+               <p className="text-[var(--glow)] font-mono text-sm uppercase tracking-widest">Creando instancia de Agente...</p>
+            </div>
+         ) : vaultCharacters.length === 0 ? (
             <div className="text-center p-8 border border-dashed border-[var(--border-light)] rounded-sm bg-[var(--surface-alt)]/50 max-w-md">
               <p className="text-[var(--text-muted)] font-mono text-sm mb-4">No tienes personajes registrados en The Character Vault.</p>
               <a href="https://tmc-characters-maker.vercel.app/" target="_blank" className="inline-block bg-[var(--accent)] text-white px-4 py-2 text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-[var(--accent-hover)] transition-colors">Crear Personaje</a>
@@ -450,51 +715,104 @@ export default function ChatUI() {
         </div>
       )}
 
-      {/* Add Sprite Modal */}
-      {isAddSpriteModalOpen && (
+      {/* Manage Sprite Modal */}
+      {isSpriteModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-           <div className="w-full max-w-md bg-[var(--surface)] border border-[var(--border)] rounded-sm shadow-2xl flex flex-col max-h-[90vh]">
+           <div className="w-full max-w-2xl bg-[var(--surface)] border border-[var(--border)] rounded-sm shadow-2xl flex flex-col max-h-[90vh]">
               <div className="p-5 border-b border-[var(--border)] flex justify-between items-center bg-[var(--surface-alt)]">
-                <h2 className="text-xs font-bold text-[var(--text)] tracking-widest uppercase">Registrar Nuevo Sprite</h2>
-                <button onClick={() => setIsAddSpriteModalOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text)]">
+                <h2 className="text-xs font-bold text-[var(--text)] tracking-widest uppercase">{editingSpriteId ? 'Editar Sprite' : 'Registrar Nuevo Sprite'}</h2>
+                <button onClick={() => setIsSpriteModalOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text)]">
                   <X size={16} />
                 </button>
               </div>
-              <div className="p-6 space-y-4">
-                 <div>
-                   <label className="block font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)] mb-2">Nombre / Expresión</label>
-                   <input 
-                     type="text" 
-                     value={newSpriteName}
-                     onChange={e => setNewSpriteName(e.target.value)}
-                     placeholder="Ej: Enojado, Sonriendo..."
-                     className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-mono text-sm rounded-sm p-2.5 outline-none focus:border-[var(--glow)]/50 transition-colors"
-                   />
+              <div className="p-0 flex flex-col md:flex-row overflow-hidden flex-1">
+                 {/* Visual Novel Preview Box */}
+                 <div className="h-64 md:h-[500px] md:flex-1 bg-[var(--bg)] border-b md:border-b-0 md:border-r border-[var(--border)] relative flex items-end justify-center overflow-hidden z-0">
+                    <div className="absolute top-4 left-4 z-10 mono-label text-[9px] opacity-70 drop-shadow-md bg-[var(--surface-alt)]/80 px-2 py-1 rounded-sm">PREVIEW (VN STYLE)</div>
+                    {/* Background mock */}
+                    <div className="absolute inset-0 z-0 opacity-20"><div className="w-full h-full bg-[url('https://www.transparenttextures.com/patterns/black-scales.png')]"></div></div>
+                    {newSpriteUrl ? (
+                      <div className="w-[300px] h-[500px] relative pointer-events-none" style={{ transform: `scale(${newSpriteScale}) translateY(${newSpritePositionY * -1}px)`, transformOrigin: 'bottom center' }}>
+                         <Image src={newSpriteUrl} alt="Preview" fill className="object-contain object-bottom drop-shadow-[0_0_15px_rgba(0,0,0,0.8)]" />
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-full w-full opacity-30 pb-20">
+                         <User size={80} className="mb-4" />
+                         <span className="font-mono text-sm tracking-widest uppercase">Sin Imagen</span>
+                      </div>
+                    )}
                  </div>
-                 <div className="mb-2">
-                   <ImageUploader 
-                     value={newSpriteUrl} 
-                     onChange={setNewSpriteUrl} 
-                     label="Imagen del Sprite (URL o Subir)"
-                     bucket="character-sprites"
-                   />
-                 </div>
-                 <div className="pt-2 flex justify-end gap-3">
-                   <button 
-                     type="button" 
-                     onClick={() => setIsAddSpriteModalOpen(false)}
-                     className="px-4 py-2 border border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--text)] rounded-sm text-[10px] font-bold uppercase tracking-widest transition-colors"
-                   >
-                     Cancelar
-                   </button>
-                   <button 
-                     type="button" 
-                     onClick={handleAddSprite}
-                     disabled={isUploadingSprite || !newSpriteName || !newSpriteUrl}
-                     className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-sm text-[10px] font-bold uppercase tracking-widest transition-all shadow-[0_0_10px_rgba(59,130,246,0.3)]"
-                   >
-                     {isUploadingSprite ? 'Guardando...' : 'Confirmar'}
-                   </button>
+
+                 <div className="flex-1 max-w-[320px] p-6 flex flex-col overflow-y-auto custom-scrollbar bg-[var(--surface)]">
+                    <div className="space-y-5 flex-1">
+                      <div className="space-y-2">
+                        <label className="block font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Nombre / Expresión</label>
+                        <input 
+                          type="text" 
+                          value={newSpriteName}
+                          onChange={e => setNewSpriteName(e.target.value)}
+                          placeholder="Ej: Enojado, Sonriendo..."
+                          className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-mono text-sm rounded-sm p-3 outline-none focus:border-[var(--glow)]/50 transition-colors"
+                        />
+                      </div>
+
+                      <div className="mb-2">
+                       <ImageUploader 
+                         value={newSpriteUrl} 
+                         onChange={setNewSpriteUrl} 
+                         label="Imagen del Sprite"
+                         bucket="character-sprites"
+                       />
+                     </div>
+
+                     <div className="space-y-5 py-4 border-t border-[var(--border-light)] mt-2">
+                       <div>
+                         <div className="flex justify-between items-center mb-3">
+                            <label className="font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Escala (Tamaño)</label>
+                            <span className="text-[10px] py-0.5 px-2 bg-[var(--surface-alt)] border border-[var(--border)] rounded-sm font-mono text-[var(--glow)]">{(newSpriteScale * 100).toFixed(0)}%</span>
+                         </div>
+                         <input type="range" min="0.5" max="3.0" step="0.05" value={newSpriteScale} onChange={(e) => setNewSpriteScale(parseFloat(e.target.value))} className="w-full h-1.5 bg-[var(--border)] rounded-sm appearance-none cursor-pointer" />
+                       </div>
+
+                       <div>
+                         <div className="flex justify-between items-center mb-3">
+                            <label className="font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Posición Y (Altura)</label>
+                            <span className="text-[10px] py-0.5 px-2 bg-[var(--surface-alt)] border border-[var(--border)] rounded-sm font-mono text-[var(--glow)]">{newSpritePositionY}px</span>
+                         </div>
+                         <input type="range" min="-300" max="300" step="1" value={newSpritePositionY} onChange={(e) => setNewSpritePositionY(parseFloat(e.target.value))} className="w-full h-1.5 bg-[var(--border)] rounded-sm appearance-none cursor-pointer" />
+                         <p className="text-[9px] text-[var(--text-muted)] mt-2 text-center">+ Valores suben, - Valores bajan el sprite</p>
+                       </div>
+                     </div>
+                   </div>
+
+                   <div className="pt-4 flex flex-col gap-3 border-t border-[var(--border)] mt-4">
+                     <button 
+                       type="button" 
+                       onClick={handleSaveSprite}
+                       disabled={isUploadingSprite || !newSpriteName || !newSpriteUrl}
+                       className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-sm text-[10px] font-bold uppercase tracking-widest transition-all shadow-[0_0_10px_rgba(59,130,246,0.3)]"
+                     >
+                       {isUploadingSprite ? 'Guardando...' : 'Guardar Transformaciones'}
+                     </button>
+                     <div className="flex gap-2">
+                       {editingSpriteId && (
+                          <button 
+                            type="button" 
+                            onClick={() => handleDeleteSprite(editingSpriteId)}
+                            className="flex-1 py-2 border border-transparent text-[var(--danger)] hover:bg-[var(--danger)]/10 rounded-sm text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center justify-center gap-2"
+                          >
+                             <Trash2 size={12} /> Eliminar
+                          </button>
+                       )}
+                       <button 
+                         type="button" 
+                         onClick={() => setIsSpriteModalOpen(false)}
+                         className="flex-1 py-2 border border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--text)] rounded-sm text-[10px] font-bold uppercase tracking-widest transition-colors"
+                       >
+                         Cancelar
+                       </button>
+                     </div>
+                   </div>
                  </div>
               </div>
            </div>
@@ -504,7 +822,7 @@ export default function ChatUI() {
       {/* Add Resource Modal */}
       {isAddResourceModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-           <div className="w-full max-w-md bg-[var(--surface)] border border-[var(--border)] rounded-sm shadow-2xl flex flex-col max-h-[90vh]">
+           <div className="w-full max-w-lg bg-[var(--surface)] border border-[var(--border)] rounded-sm shadow-2xl flex flex-col max-h-[90vh]">
               <div className="p-5 border-b border-[var(--border)] flex justify-between items-center bg-[var(--surface-alt)]">
                 <h2 className="text-xs font-bold text-[var(--text)] tracking-widest uppercase">Añadir Recurso</h2>
                 <button onClick={() => setIsAddResourceModalOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text)]">
@@ -522,15 +840,17 @@ export default function ChatUI() {
                      <option value="image">Imagen General</option>
                      <option value="map">Mapa / Plano</option>
                      <option value="text">Nota / Texto</option>
+                     <option value="enemy">Enemigo / Bestia</option>
+                     <option value="item">Objeto / Ítem</option>
                    </select>
                  </div>
                  <div>
-                   <label className="block font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)] mb-2">Título</label>
+                   <label className="block font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)] mb-2">Título / Nombre</label>
                    <input 
                      type="text" 
                      value={newResourceTitle}
                      onChange={e => setNewResourceTitle(e.target.value)}
-                     placeholder="Ej: Mapa del Sector 7"
+                     placeholder="Ej: Mapa del Sector 7 / Rey Demonio"
                      className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-sans text-sm rounded-sm p-2.5 outline-none focus:border-[var(--glow)]/50 transition-colors"
                    />
                  </div>
@@ -545,7 +865,47 @@ export default function ChatUI() {
                        className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-sans text-sm rounded-sm p-2.5 outline-none focus:border-[var(--glow)]/50 transition-colors min-h-[120px]"
                      />
                    </div>
-                 ) : (
+                 ) : newResourceType === 'enemy' ? (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)] mb-2">Descripción</label>
+                        <textarea value={newResourceContent} onChange={e => setNewResourceContent(e.target.value)} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-sans text-sm rounded-sm p-2.5 outline-none focus:border-[var(--glow)]/50 min-h-[60px]" placeholder="Breve lore o descripción..." />
+                      </div>
+                      <ImageUploader value={newResourceImageUrl} onChange={setNewResourceImageUrl} label="Imagen del Enemigo (Opcional)" bucket="chatroom_images" />
+                      <div className="grid grid-cols-2 gap-3">
+                         <div><label className="block font-mono text-[10px] text-[var(--text-muted)]">HP</label><input type="number" value={newResourceHp} onChange={e => setNewResourceHp(Number(e.target.value))} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] outline-none focus:border-[var(--glow)]/50 p-2 rounded-sm text-sm" /></div>
+                         <div><label className="block font-mono text-[10px] text-[var(--text-muted)]">Mana</label><input type="number" value={newResourceMana} onChange={e => setNewResourceMana(Number(e.target.value))} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] outline-none focus:border-[var(--glow)]/50 p-2 rounded-sm text-sm" /></div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                         <div><label className="block font-mono text-[10px] text-[var(--text-muted)]">Poder Ofensivo</label><input type="text" value={newResourceOffensive} onChange={e => setNewResourceOffensive(e.target.value)} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] outline-none focus:border-[var(--glow)]/50 p-2 rounded-sm text-sm" /></div>
+                         <div><label className="block font-mono text-[10px] text-[var(--text-muted)]">Poder Defensivo</label><input type="text" value={newResourceDefensive} onChange={e => setNewResourceDefensive(e.target.value)} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] outline-none focus:border-[var(--glow)]/50 p-2 rounded-sm text-sm" /></div>
+                         <div><label className="block font-mono text-[10px] text-[var(--text-muted)]">Habilidad Física</label><input type="text" value={newResourcePhysical} onChange={e => setNewResourcePhysical(e.target.value)} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] outline-none focus:border-[var(--glow)]/50 p-2 rounded-sm text-sm" /></div>
+                         <div><label className="block font-mono text-[10px] text-[var(--text-muted)]">Suerte</label><input type="text" value={newResourceLuck} onChange={e => setNewResourceLuck(e.target.value)} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] outline-none focus:border-[var(--glow)]/50 p-2 rounded-sm text-sm" /></div>
+                         <div><label className="block font-mono text-[10px] text-[var(--text-muted)]">Llama (Blaze)</label><input type="text" value={newResourceBlaze} onChange={e => setNewResourceBlaze(e.target.value)} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] outline-none focus:border-[var(--glow)]/50 p-2 rounded-sm text-sm" /></div>
+                         <div><label className="block font-mono text-[10px] text-[var(--text-muted)]">Elemento Avanzado</label><input type="text" value={newResourceElement} onChange={e => setNewResourceElement(e.target.value)} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] outline-none focus:border-[var(--glow)]/50 p-2 rounded-sm text-sm" /></div>
+                      </div>
+                      <div>
+                        <label className="block font-mono text-[10px] text-[var(--text-muted)]">Usuario / Creador</label><input type="text" value={newResourceCreator} onChange={e => setNewResourceCreator(e.target.value)} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] outline-none focus:border-[var(--glow)]/50 p-2 rounded-sm text-sm" />
+                      </div>
+                    </div>
+                  ) : newResourceType === 'item' ? (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)] mb-2">Descripción</label>
+                        <textarea value={newResourceContent} onChange={e => setNewResourceContent(e.target.value)} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-sans text-sm rounded-sm p-2.5 outline-none focus:border-[var(--glow)]/50 min-h-[60px]" placeholder="Breve descripción..." />
+                      </div>
+                      <ImageUploader value={newResourceImageUrl} onChange={setNewResourceImageUrl} label="Imagen del Objeto (Opcional)" bucket="chatroom_images" />
+                      <div>
+                        <label className="block font-mono text-[10px] text-[var(--text-muted)]">Tipo</label><input type="text" value={newResourceItemType} onChange={e => setNewResourceItemType(e.target.value)} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] outline-none focus:border-[var(--glow)]/50 p-2 rounded-sm text-sm" />
+                      </div>
+                      <div>
+                        <label className="block font-mono text-[10px] text-[var(--text-muted)]">Estadísticas</label><input type="text" value={newResourceStats} onChange={e => setNewResourceStats(e.target.value)} placeholder="Ej: +10 Ataque" className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] outline-none focus:border-[var(--glow)]/50 p-2 rounded-sm text-sm" />
+                      </div>
+                      <div>
+                        <label className="block font-mono text-[10px] text-[var(--text-muted)]">Efecto</label><input type="text" value={newResourceEffect} onChange={e => setNewResourceEffect(e.target.value)} className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] outline-none focus:border-[var(--glow)]/50 p-2 rounded-sm text-sm" />
+                      </div>
+                    </div>
+                  ) : (
                    <div className="mb-2">
                      <ImageUploader 
                        value={newResourceContent} 
@@ -566,7 +926,7 @@ export default function ChatUI() {
                    <button 
                      type="button" 
                      onClick={handleAddResource}
-                     disabled={isUploadingResource || !newResourceTitle || !newResourceContent}
+                     disabled={isUploadingResource || !newResourceTitle || (!newResourceContent && !newResourceImageUrl)}
                      className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-sm text-[10px] font-bold uppercase tracking-widest transition-all shadow-[0_0_10px_rgba(59,130,246,0.3)]"
                    >
                      {isUploadingResource ? 'Guardando...' : 'Confirmar'}
@@ -577,7 +937,167 @@ export default function ChatUI() {
         </div>
       )}
 
+      {/* Manage Turns Modal */}
+      {isManageTurnsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+           <div className="w-full max-w-2xl bg-[var(--surface)] border border-[var(--border)] rounded-sm shadow-2xl flex flex-col max-h-[90vh]">
+              <div className="p-5 border-b border-[var(--border)] flex justify-between items-center bg-[var(--surface-alt)]">
+                <h2 className="text-xs font-bold text-[var(--text)] tracking-widest uppercase">Gestor de Turnos</h2>
+                <div className="flex gap-4">
+                  <button onClick={handleAddTurnGroup} className="flex items-center gap-2 text-[10px] font-bold text-[var(--glow)] hover:text-white transition-colors bg-[var(--glow)]/10 px-3 py-1.5 rounded-sm">
+                    <Plus size={14} /> Añadir Grupo
+                  </button>
+                  <button onClick={() => setIsManageTurnsModalOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text)]">
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar flex-1 bg-[var(--bg)]/50">
+                {editableTurns.length === 0 ? (
+                  <p className="text-center text-[var(--text-muted)] text-sm font-mono mt-8">No hay grupos de turnos. Crea uno para empezar.</p>
+                ) : (
+                  editableTurns.map((group, groupIndex) => (
+                    <div key={group.id} className="bg-[var(--surface)] border border-[var(--border)] rounded-sm p-4 space-y-4 shadow-lg shadow-black/50">
+                      
+                      <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+                        <div className="flex-1 space-y-2 w-full">
+                          <label className="text-[10px] uppercase font-bold text-[var(--text-muted)] tracking-widest">Nombre del Grupo</label>
+                          <input 
+                            value={group.name} 
+                            onChange={(e) => {
+                              const newTurns = [...editableTurns];
+                              newTurns[groupIndex].name = e.target.value;
+                              setEditableTurns(newTurns);
+                            }}
+                            className="bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] px-3 py-1.5 text-sm outline-none rounded-sm w-full focus:border-[var(--glow)]/50 transition-colors"
+                          />
+                        </div>
+                        <div className="flex-1 space-y-2 w-full">
+                          <label className="text-[10px] uppercase font-bold text-[var(--text-muted)] tracking-widest">Aviso (Deadline)</label>
+                          <input 
+                            value={group.deadline_text || ''} 
+                            onChange={(e) => {
+                              const newTurns = [...editableTurns];
+                              newTurns[groupIndex].deadline_text = e.target.value;
+                              setEditableTurns(newTurns);
+                            }}
+                            placeholder="Ej: dos días para turno"
+                            className="bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] px-3 py-1.5 text-sm outline-none rounded-sm w-full focus:border-[var(--glow)]/50 transition-colors"
+                          />
+                        </div>
+                        <button 
+                          onClick={() => setEditableTurns(editableTurns.filter(g => g.id !== group.id))}
+                          className="mt-6 p-2 text-[var(--danger)]/70 hover:text-[var(--danger)] hover:bg-[var(--danger)]/10 rounded-sm transition-colors border border-transparent hover:border-[var(--danger)]/30"
+                          title="Eliminar Grupo"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+
+                      <div className="border border-[var(--border-light)] rounded-sm bg-[var(--surface-alt)]">
+                         <div className="p-3 border-b border-[var(--border-light)] flex justify-between items-center">
+                            <h4 className="text-[10px] uppercase tracking-widest font-bold text-[var(--text-muted)]">Personajes ({group.characters.length})</h4>
+                            <select 
+                              className="bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-[10px] px-2 py-1 outline-none rounded-sm"
+                              onChange={(e) => {
+                                if(!e.target.value) return;
+                                const char = availableRoomCharacters.find(c => c.id === e.target.value);
+                                if(char) {
+                                  const newTurns = [...editableTurns];
+                                  if (!newTurns[groupIndex].characters.some(c => c.character_id === char.id)) {
+                                     newTurns[groupIndex].characters.push({ character_id: char.id, name: char.name, initiative: 0 });
+                                     // Sort simply
+                                     newTurns[groupIndex].characters.sort((a,b) => b.initiative - a.initiative);
+                                  }
+                                  setEditableTurns(newTurns);
+                                }
+                                e.target.value = "";
+                              }}
+                            >
+                              <option value="">+ Añadir al Turno</option>
+                              {availableRoomCharacters.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                         </div>
+
+                         <div className="p-2 space-y-1">
+                           {group.characters.length === 0 ? (
+                              <p className="text-center text-[var(--text-muted)] text-[10px] py-4">Agrega participantes desde el menú.</p>
+                           ) : (
+                             group.characters.map((char, charIndex) => (
+                               <div key={char.character_id} className={`flex items-center gap-3 p-2 rounded-sm border ${group.active_character_id === char.character_id ? 'border-[var(--glow)] bg-[var(--glow)]/10' : 'border-transparent bg-[var(--surface)]/50'}`}>
+                                  <button 
+                                     onClick={() => {
+                                       const newTurns = [...editableTurns];
+                                       newTurns[groupIndex].active_character_id = newTurns[groupIndex].active_character_id === char.character_id ? null : char.character_id;
+                                       setEditableTurns(newTurns);
+                                     }}
+                                     className={`w-4 h-4 rounded-full border flex-shrink-0 flex items-center justify-center transition-colors ${group.active_character_id === char.character_id ? 'border-[var(--glow)] bg-[var(--glow)] shadow-[0_0_8px_var(--glow)]' : 'border-[var(--border)] hover:border-[var(--glow)]/50'}`}
+                                     title="Marcar como turno actual"
+                                  >
+                                    {group.active_character_id === char.character_id && <div className="w-1.5 h-1.5 bg-[var(--bg)] rounded-full" />}
+                                  </button>
+                                  
+                                  <span className="flex-1 text-sm text-[var(--text)] font-mono">{char.name}</span>
+                                  
+                                  <div className="flex items-center gap-2">
+                                     <label className="text-[10px] text-[var(--text-muted)]">INICIATIVA:</label>
+                                     <input 
+                                       type="number" 
+                                       value={char.initiative}
+                                       onChange={(e) => {
+                                          const newTurns = [...editableTurns];
+                                          newTurns[groupIndex].characters[charIndex].initiative = Number(e.target.value) || 0;
+                                          newTurns[groupIndex].characters.sort((a,b) => b.initiative - a.initiative);
+                                          setEditableTurns(newTurns);
+                                       }}
+                                       className="w-16 bg-[var(--bg)] border border-[var(--border)] text-center text-sm py-1 rounded-sm text-[var(--glow)] font-bold outline-none"
+                                     />
+                                  </div>
+                                  
+                                  <button 
+                                    onClick={() => {
+                                      const newTurns = [...editableTurns];
+                                      newTurns[groupIndex].characters = newTurns[groupIndex].characters.filter(c => c.character_id !== char.character_id);
+                                      if(newTurns[groupIndex].active_character_id === char.character_id) newTurns[groupIndex].active_character_id = null;
+                                      setEditableTurns(newTurns);
+                                    }}
+                                    className="p-1.5 text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                               </div>
+                             ))
+                           )}
+                         </div>
+                      </div>
+
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="p-5 border-t border-[var(--border)] bg-[var(--surface-alt)] flex justify-end gap-3 shrink-0">
+                 <button 
+                   onClick={() => setIsManageTurnsModalOpen(false)}
+                   className="px-4 py-2 border border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--text)] rounded-sm text-[10px] font-bold uppercase tracking-widest transition-colors"
+                 >
+                   Cancelar
+                 </button>
+                 <button 
+                   onClick={handleSaveTurns}
+                   className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-sm text-[10px] font-bold uppercase tracking-widest transition-all shadow-[0_0_10px_rgba(59,130,246,0.3)]"
+                 >
+                   Guardar Cambios
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
+
       {/* Background Image & Pattern */}
+
       {chatroomData?.background_url && (
           <div className="absolute inset-0 z-0 opacity-30 grayscale-[50%]">
              <Image src={chatroomData.background_url} alt="Room Background" fill className="object-cover" />
@@ -648,14 +1168,20 @@ export default function ChatUI() {
                  <div className="relative w-full flex flex-col justify-end mt-auto">
                   {/* Sprite - Positioned to the right */}
                   {!isSystem && (
-                    <div className="absolute bottom-full right-[10%] w-[450px] h-[600px] pointer-events-auto transition-all animate-in fade-in slide-in-from-bottom-5 z-20">
+                    <div className="absolute bottom-full right-[10%] w-[450px] h-[600px] pointer-events-auto transition-all animate-in fade-in slide-in-from-bottom-5 z-20 flex items-end justify-center">
                       {lastMsg.character_sprites?.image_url ? (
-                        <div className="w-full h-full relative">
+                        <div 
+                          className="w-full h-full relative"
+                          style={{ 
+                            transform: `scale(${lastMsg.character_sprites.scale ?? 1.0}) translateY(${(lastMsg.character_sprites.position_y ?? 0) * -1}px)`, 
+                            transformOrigin: 'bottom center' 
+                          }}
+                        >
                           <Image 
                             src={lastMsg.character_sprites.image_url} 
                             alt={speakerName} 
                             fill
-                            className="object-contain drop-shadow-[0_0_20px_rgba(0,0,0,0.8)]" 
+                            className="object-contain object-bottom drop-shadow-[0_0_20px_rgba(0,0,0,0.8)]" 
                           />
                         </div>
                       ) : (
@@ -705,16 +1231,29 @@ export default function ChatUI() {
               {messages.length === 0 ? (
                 <div className="text-center text-[var(--text-muted)] text-xs font-mono uppercase tracking-widest mt-10">Sin Historial</div>
               ) : (
-                messages.map(msg => {
-                  const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  const senderName = msg.chatroom_characters?.name || msg.profiles?.username || 'Sistema';
-                  const color = msg.is_system_message ? 'text-[var(--danger)]' : 'text-[var(--accent)]';
+                <>
+                  {hasMoreMessages && (
+                    <div className="flex justify-center pb-2">
+                       <button 
+                          onClick={() => loadMoreMessages(id as string, user?.id || '')}
+                          disabled={isLoadingMore}
+                          className="bg-[var(--surface-alt)] border border-[var(--border)] text-[var(--glow)] hover:text-white hover:border-[var(--glow)] text-[10px] font-bold tracking-widest uppercase px-4 py-2 rounded-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                       >
+                          {isLoadingMore ? 'Cargando...' : '▲ Cargar mensajes anteriores'}
+                       </button>
+                    </div>
+                  )}
+                  {messages.map(msg => {
+                    const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const senderName = msg.chatroom_characters?.name || msg.profiles?.username || 'Sistema';
+                    const color = msg.is_system_message ? 'text-[var(--danger)]' : 'text-[var(--accent)]';
 
-                  if (msg.dice_result) {
-                    return <DiceMessage key={msg.id} sender={senderName} time={time} text={msg.content} result={msg.dice_result.roll.toString()} color={color} />
-                  }
-                  return <Message key={msg.id} sender={senderName} time={time} text={msg.content} color={color} isWhisper={msg.is_dm_whisper} targetName={msg.target_profile?.username} />
-                })
+                    if (msg.dice_result) {
+                      return <DiceMessage key={msg.id} sender={senderName} time={time} text={msg.content} result={msg.dice_result.roll.toString()} color={color} />
+                    }
+                    return <Message key={msg.id} sender={senderName} time={time} text={msg.content} color={color} isWhisper={msg.is_dm_whisper} targetName={msg.target_profile?.username} />
+                  })}
+                </>
               )}
               <div ref={messagesEndRef} />
             </div>
@@ -727,34 +1266,43 @@ export default function ChatUI() {
                 <Clock size={14} />
                 <h2 className="text-[10px] font-bold tracking-widest uppercase text-[var(--text)]">Orden de Turnos</h2>
               </div>
-              <button onClick={() => setIsTurnOrderOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text)]">
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-3">
+                {isMaster && (
+                  <button onClick={handleOpenManageTurns} className="text-[var(--glow)] hover:text-white bg-[var(--glow)]/10 p-1 rounded-sm" title="Gestionar Turnos">
+                    <Plus size={14} />
+                  </button>
+                )}
+                <button onClick={() => setIsTurnOrderOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text)]">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-8 custom-scrollbar">
-              {/* Group 1 */}
-              <div>
-                <div className="flex justify-between items-end mb-4">
-                  <h3 className="mono-label">Grupo 1</h3>
-                  <span className="text-[8px] text-[var(--glow)] border border-[var(--glow)]/30 bg-[var(--glow)]/10 px-1.5 py-0.5 rounded-sm uppercase tracking-wider">dos días para el siguiente turno</span>
-                </div>
-                <div className="space-y-2">
-                  <TurnItem name="Ekaterina" status="Turno Actual" initiative="20" isActive />
-                  <TurnItem name="Romilda" status="En espera" initiative="15" />
-                  <TurnItem name="Zhao" status="En espera" initiative="4" />
-                  <TurnItem name="Scharlacrot" status="En espera" initiative="1" />
-                </div>
-              </div>
-              {/* Group 2 */}
-              <div>
-                <div className="flex justify-between items-end mb-4">
-                  <h3 className="mono-label">Grupo 2</h3>
-                </div>
-                <div className="space-y-2">
-                  <TurnItem name="Heilig" status="Turno Actual" initiative="20" isActive />
-                  <TurnItem name="Markus" status="En espera" initiative="10" />
-                </div>
-              </div>
+              {chatroomData?.turns && chatroomData.turns.length > 0 ? (
+                chatroomData.turns.map(group => (
+                  <div key={group.id}>
+                    <div className="flex justify-between items-end mb-4">
+                      <h3 className="mono-label">{group.name}</h3>
+                      {group.deadline_text && (
+                        <span className="text-[8px] text-[var(--glow)] border border-[var(--glow)]/30 bg-[var(--glow)]/10 px-1.5 py-0.5 rounded-sm uppercase tracking-wider">{group.deadline_text}</span>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      {group.characters.map(char => (
+                        <TurnItem 
+                           key={char.character_id}
+                           name={char.name} 
+                           status={group.active_character_id === char.character_id ? "Turno Actual" : "En espera"} 
+                           initiative={char.initiative.toString()} 
+                           isActive={group.active_character_id === char.character_id} 
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center text-[var(--text-muted)] text-xs font-mono uppercase tracking-widest mt-10">Sin Grupos Activos</div>
+              )}
             </div>
           </div>
 
@@ -792,6 +1340,84 @@ export default function ChatUI() {
                            <Maximize2 size={12} />
                          </a>
                        </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {chatroomData?.resources?.filter(r => r.type === 'enemy').length ? (
+                <div className="space-y-4">
+                  <h3 className="mono-label mb-2 border-b border-[var(--danger)]/30 pb-2 text-[var(--danger)]">Enemigos y Bestias</h3>
+                  {chatroomData.resources.filter(r => r.type === 'enemy').map(r => (
+                    <div key={r.id} className="bg-[var(--surface-alt)] border border-[var(--danger)]/30 rounded-sm overflow-hidden flex flex-col">
+                       {r.image_url && (
+                         <div className="w-full h-32 relative border-b border-[var(--border)]">
+                            <Image src={r.image_url} alt={r.title} fill className="object-cover object-center" />
+                         </div>
+                       )}
+                       <div className="p-4 space-y-3">
+                         <h4 className="font-bold text-sm text-[var(--danger)] tracking-wide uppercase">{r.title}</h4>
+                         {r.content && <p className="text-[10px] text-[var(--text-muted)] font-mono italic leading-relaxed">{r.content}</p>}
+                         
+                         <div className="grid grid-cols-2 gap-2 mt-2">
+                           {r.hp !== undefined && <div className="bg-[var(--bg)] px-2 py-1.5 rounded-sm flex justify-between items-center"><span className="text-[9px] text-[var(--text-muted)] font-mono">HP</span><span className="text-xs font-bold text-[var(--danger)]">{r.hp}</span></div>}
+                           {r.mana !== undefined && <div className="bg-[var(--bg)] px-2 py-1.5 rounded-sm flex justify-between items-center"><span className="text-[9px] text-[var(--text-muted)] font-mono">MANA</span><span className="text-xs font-bold text-[var(--glow)]">{r.mana}</span></div>}
+                         </div>
+                         
+                         {(r.offensive_power || r.defensive_power || r.physical_ability || r.luck) && (
+                           <div className="grid grid-cols-2 gap-2">
+                             {r.offensive_power && <div className="bg-[var(--bg)] px-2 py-1.5 rounded-sm flex justify-between items-center"><span className="text-[8px] text-[var(--text-muted)] font-mono">ATK</span><span className="text-[10px] font-bold text-[var(--text)]">{r.offensive_power}</span></div>}
+                             {r.defensive_power && <div className="bg-[var(--bg)] px-2 py-1.5 rounded-sm flex justify-between items-center"><span className="text-[8px] text-[var(--text-muted)] font-mono">DEF</span><span className="text-[10px] font-bold text-[var(--text)]">{r.defensive_power}</span></div>}
+                             {r.physical_ability && <div className="bg-[var(--bg)] px-2 py-1.5 rounded-sm flex justify-between items-center"><span className="text-[8px] text-[var(--text-muted)] font-mono">PHY</span><span className="text-[10px] font-bold text-[var(--text)]">{r.physical_ability}</span></div>}
+                             {r.luck && <div className="bg-[var(--bg)] px-2 py-1.5 rounded-sm flex justify-between items-center"><span className="text-[8px] text-[var(--text-muted)] font-mono">LCK</span><span className="text-[10px] font-bold text-[var(--text)]">{r.luck}</span></div>}
+                           </div>
+                         )}
+                         
+                         {(r.blaze || r.advanced_element) && (
+                           <div className="space-y-1.5 pt-2 border-t border-[var(--border)]">
+                             {r.blaze && <div className="flex justify-between items-center"><span className="text-[9px] text-[var(--accent)] font-mono uppercase">Blaze</span><span className="text-[10px] font-bold">{r.blaze}</span></div>}
+                             {r.advanced_element && <div className="flex justify-between items-center"><span className="text-[9px] text-[var(--glow)] font-mono uppercase">Elemento</span><span className="text-[10px] font-bold">{r.advanced_element}</span></div>}
+                           </div>
+                         )}
+                         
+                         {r.creator && (
+                           <div className="pt-2 border-t border-[var(--border)] flex justify-between items-center">
+                             <span className="text-[8px] text-[var(--text-muted)] font-mono">CREADOR</span>
+                             <span className="text-[9px] text-[var(--text)] uppercase tracking-wider">{r.creator}</span>
+                           </div>
+                         )}
+                       </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {chatroomData?.resources?.filter(r => r.type === 'item').length ? (
+                <div className="space-y-4">
+                  <h3 className="mono-label mb-2 border-b border-[var(--accent)]/30 pb-2 text-[var(--accent)]">Inventario y Objetos</h3>
+                  {chatroomData.resources.filter(r => r.type === 'item').map(r => (
+                    <div key={r.id} className="bg-[var(--surface-alt)] border border-[var(--accent)]/30 rounded-sm overflow-hidden flex flex-col p-4 relative group">
+                       <div className="flex gap-4">
+                         {r.image_url && (
+                           <div className="w-16 h-16 relative border border-[var(--border)] rounded-sm shrink-0 overflow-hidden bg-[var(--bg)]">
+                              <Image src={r.image_url} alt={r.title} fill className="object-cover object-center" />
+                           </div>
+                         )}
+                         <div className="flex-1 space-y-2">
+                           <div className="flex justify-between items-start">
+                             <h4 className="font-bold text-xs text-[var(--accent)] tracking-wide uppercase line-clamp-2">{r.title}</h4>
+                             {r.item_type && <span className="text-[8px] bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/30 px-1.5 py-0.5 rounded-sm">{r.item_type}</span>}
+                           </div>
+                           {r.content && <p className="text-[10px] text-[var(--text-muted)] font-mono leading-relaxed">{r.content}</p>}
+                         </div>
+                       </div>
+                       
+                       {(r.stats || r.effect) && (
+                         <div className="top-full mt-3 pt-3 border-t border-[var(--border)] space-y-2">
+                           {r.stats && <div className="flex flex-col"><span className="text-[8px] text-[var(--text-muted)] font-mono">ESTADÍSTICAS</span><span className="text-[10px] font-bold text-[var(--glow)]">{r.stats}</span></div>}
+                           {r.effect && <div className="flex flex-col"><span className="text-[8px] text-[var(--text-muted)] font-mono">EFECTO MÁGICO/PASIVA</span><span className="text-[10px] font-bold font-serif italic text-[var(--text)]">{r.effect}</span></div>}
+                         </div>
+                       )}
                     </div>
                   ))}
                 </div>
@@ -870,27 +1496,39 @@ export default function ChatUI() {
           <div className="flex items-center gap-3">
             {/* Expression / Sprite Selection */}
             {activeCharacterSprites.length > 0 && (
-              <div className="relative">
-                <select 
-                  value={selectedSpriteId || activeCharacterSprites[0]?.id || ''}
-                  onChange={(e) => setSelectedSpriteId(e.target.value)}
-                  className="bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] text-[10px] uppercase tracking-wider font-bold rounded-sm px-3 py-1.5 outline-none focus:border-[var(--glow)]/50 appearance-none min-w-[200px] pr-8 cursor-pointer hover:bg-[var(--border)] transition-colors"
-                >
-                {activeCharacterSprites.map(sprite => (
-                    <option key={sprite.id} value={sprite.id}>{sprite.name}</option>
-                  ))}
-                </select>
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--text-muted)]">
-                   <User size={12} />
+              <div className="relative flex items-center gap-1">
+                <div className="relative">
+                  <select 
+                    value={selectedSpriteId || activeCharacterSprites[0]?.id || ''}
+                    onChange={(e) => setSelectedSpriteId(e.target.value)}
+                    className="bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] text-[10px] uppercase tracking-wider font-bold rounded-sm px-3 py-1.5 outline-none focus:border-[var(--glow)]/50 appearance-none min-w-[200px] pr-8 cursor-pointer hover:bg-[var(--border)] transition-colors"
+                  >
+                  {activeCharacterSprites.map(sprite => (
+                      <option key={sprite.id} value={sprite.id}>{sprite.name}</option>
+                    ))}
+                  </select>
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--text-muted)]">
+                     <User size={12} />
+                  </div>
                 </div>
+                {selectedSpriteId && (
+                  <button
+                     type="button"
+                     onClick={() => openEditSprite(activeCharacterSprites.find(s => s.id === selectedSpriteId)!)}
+                     className="p-1.5 text-[var(--text-muted)] hover:text-[var(--glow)] hover:bg-[var(--glow)]/10 rounded-sm transition-colors border border-transparent"
+                     title="Editar o Eliminar este Sprite"
+                  >
+                     <Pencil size={14} />
+                  </button>
+                )}
               </div>
             )}
             
             <button 
               type="button"
-              onClick={() => setIsAddSpriteModalOpen(true)}
+              onClick={openAddSprite}
               className="px-2 py-1.5 bg-[var(--surface-alt)] border border-[var(--border-light)] hover:border-[var(--glow)]/50 hover:text-[var(--glow)] text-[var(--text-muted)] rounded-sm transition-colors"
-              title="Subir un nuevo Sprite"
+              title="Añadir un nuevo Sprite"
             >
                <ImagePlus size={14} />
             </button>
@@ -994,7 +1632,7 @@ export default function ChatUI() {
             <Dices size={14} />
             Tirar Dado
           </button>
-          <button className="flex items-center justify-center gap-2 bg-transparent hover:bg-[var(--border)] border border-[var(--border-light)] text-[var(--text)] px-4 py-2.5 rounded-sm text-[10px] font-bold uppercase tracking-widest transition-colors hover:text-[var(--glow)]">
+          <button onClick={handlePassTurn} className="flex items-center justify-center gap-2 bg-transparent hover:bg-[var(--border)] border border-[var(--border-light)] text-[var(--text)] px-4 py-2.5 rounded-sm text-[10px] font-bold uppercase tracking-widest transition-colors hover:text-[var(--glow)]">
             <SkipForward size={14} />
             Pasar Turno
           </button>
@@ -1014,22 +1652,18 @@ export default function ChatUI() {
             <div className="p-6 space-y-6">
               <div>
                 <h3 className="mono-label mb-2">Nombre</h3>
-                <p className="text-sm text-[var(--text)] font-medium tracking-wide">Operación: Sombra Azul</p>
+                <p className="text-sm text-[var(--text)] font-medium tracking-wide">{chatroomData?.title || 'Cargando...'}</p>
               </div>
               <div>
                 <h3 className="mono-label mb-2">Descripción</h3>
                 <p className="text-xs text-[var(--text-muted)] leading-relaxed font-mono">
-                  Infiltración en el sector 7. El objetivo es recuperar los datos del servidor principal antes de que la corporación inicie el borrado de emergencia.
+                  {chatroomData?.description || 'Sin descripción.'}
                 </p>
               </div>
               <div>
-                <h3 className="mono-label mb-3">Participantes</h3>
-                <div className="flex -space-x-2">
-                  {[1,2,3,4].map(i => (
-                          <div key={i} className="w-8 h-8 rounded-sm border-2 border-[var(--surface)] overflow-hidden relative">
-                            <Image src={`https://picsum.photos/seed/user${i}/100/100`} alt="User" fill className="object-cover" />
-                          </div>
-                  ))}
+                <h3 className="mono-label mb-3">Participantes ({chatters.length})</h3>
+                <div className="flex flex-wrap gap-2 text-xs text-[var(--text-muted)] font-mono">
+                  {chatters.map(c => c.username).join(', ')}
                 </div>
               </div>
             </div>
