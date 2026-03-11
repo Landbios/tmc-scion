@@ -3,12 +3,27 @@ import { useAuthStore } from '@/store/authStore';
 import { useChatroomsStore } from '@/store/chatroomStore';
 import { LogOut, Plus, Search, User, X, Settings } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import ImageUploader from '@/components/ImageUploader';
 
 export default function Dashboard() {
-  const { user, profile, signOut } = useAuthStore();
-  const { chatrooms, fetchChatrooms, createChatroom, isLoading } = useChatroomsStore();
+  const user = useAuthStore(state => state.user);
+  const profile = useAuthStore(state => state.profile);
+  const signOut = useAuthStore(state => state.signOut);
+  const authLoading = useAuthStore(state => state.isLoading);
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/');
+    }
+  }, [user, authLoading, router]);
+
+  const chatrooms = useChatroomsStore(state => state.chatrooms);
+  const fetchChatrooms = useChatroomsStore(state => state.fetchChatrooms);
+  const createChatroom = useChatroomsStore(state => state.createChatroom);
+  const isLoading = useChatroomsStore(state => state.isLoading);
   
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
