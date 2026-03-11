@@ -20,7 +20,8 @@ import {
   User,
   Plus,
   MessageSquare,
-  ImagePlus
+  ImagePlus,
+  RefreshCw
 } from 'lucide-react';
 import Image from 'next/image';
 import ImageUploader from '@/components/ImageUploader';
@@ -88,7 +89,9 @@ export default function ChatUI() {
     vaultCharacters, 
     fetchVaultCharacters, 
     joinChatroom,
-    leaveChatroom
+    leaveChatroom,
+    updateCharacterStatus,
+    syncCharacterStats
   } = useCharacterStore();
   const [isChecking, setIsChecking] = useState(true);
 
@@ -98,6 +101,10 @@ export default function ChatUI() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isAddCharacterModalOpen, setIsAddCharacterModalOpen] = useState(false);
   const [isAddSpriteModalOpen, setIsAddSpriteModalOpen] = useState(false);
+  const [isEditStatusModalOpen, setIsEditStatusModalOpen] = useState(false);
+  const [editHp, setEditHp] = useState(0);
+  const [editMana, setEditMana] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [newSpriteName, setNewSpriteName] = useState('');
   const [newSpriteUrl, setNewSpriteUrl] = useState('');
   const [isUploadingSprite, setIsUploadingSprite] = useState(false);
@@ -121,6 +128,41 @@ export default function ChatUI() {
       }, 500);
     }
     setIsUploadingSprite(false);
+  };
+
+  const handleOpenEditStatus = () => {
+    if (!activeChatroomCharacter) return;
+    setEditHp(activeChatroomCharacter.hp);
+    setEditMana(activeChatroomCharacter.mana);
+    setIsEditStatusModalOpen(true);
+  };
+
+  const handleSaveStatus = async () => {
+    if (!activeChatroomCharacter) return;
+    const success = await updateCharacterStatus(activeChatroomCharacter.id, editHp, editMana);
+    if (success) {
+      setIsEditStatusModalOpen(false);
+    } else {
+      alert("Hubo un error al actualizar el estado.");
+    }
+  };
+
+  const handleSyncStats = async () => {
+    if (!activeChatroomCharacter?.vault_character_id) return;
+    setIsSyncing(true);
+    const success = await syncCharacterStats(activeChatroomCharacter.id, activeChatroomCharacter.vault_character_id);
+    if (success) {
+      // Re-initialize local state so forms show new max immediately if we stay open
+      const updatedChar = useCharacterStore.getState().activeChatroomCharacter;
+      if (updatedChar) {
+        setEditHp(updatedChar.hp);
+        setEditMana(updatedChar.mana);
+      }
+      alert("¡Estadísticas sincronizadas exitosamente desde el Character Vault!");
+    } else {
+      alert("Error al intentar sincronizar estadísticas.");
+    }
+    setIsSyncing(false);
   };
 
   const { 
@@ -420,30 +462,6 @@ export default function ChatUI() {
             <span className="text-[10px] font-bold tracking-widest text-[var(--text)] uppercase">Roleplay por Turnos</span>
           </div>
 
-          {/* Bottom Right: Floating Action Buttons (Drawers) */}
-          <div className="absolute bottom-[200px] right-6 z-40 flex flex-col gap-3">
-            <button 
-              onClick={() => { setIsHistoryOpen(!isHistoryOpen); setIsTurnOrderOpen(false); setIsResourcesOpen(false); }} 
-              className={`w-10 h-10 rounded-sm flex items-center justify-center transition-all shadow-lg border ${isHistoryOpen ? 'bg-[var(--accent)] border-[var(--glow)] text-white text-glow' : 'bg-[var(--surface)]/80 border-[var(--border)] backdrop-blur-md text-[var(--text-muted)] hover:text-[var(--glow)] hover:border-[var(--glow)]/50'}`}
-              title="Historial de Chat"
-            >
-              <MessageSquare size={16} />
-            </button>
-            <button 
-              onClick={() => { setIsResourcesOpen(!isResourcesOpen); setIsTurnOrderOpen(false); setIsHistoryOpen(false); }} 
-              className={`w-10 h-10 rounded-sm flex items-center justify-center transition-all shadow-lg border ${isResourcesOpen ? 'bg-[var(--accent)] border-[var(--glow)] text-white text-glow' : 'bg-[var(--surface)]/80 border-[var(--border)] backdrop-blur-md text-[var(--text-muted)] hover:text-[var(--glow)] hover:border-[var(--glow)]/50'}`}
-              title="Recursos"
-            >
-              <FolderOpen size={16} />
-            </button>
-            <button 
-              onClick={() => { setIsTurnOrderOpen(!isTurnOrderOpen); setIsResourcesOpen(false); setIsHistoryOpen(false); }} 
-              className={`w-10 h-10 rounded-sm flex items-center justify-center transition-all shadow-lg border ${isTurnOrderOpen ? 'bg-[var(--accent)] border-[var(--glow)] text-white text-glow' : 'bg-[var(--surface)]/80 border-[var(--border)] backdrop-blur-md text-[var(--text-muted)] hover:text-[var(--glow)] hover:border-[var(--glow)]/50'}`}
-              title="Orden de Turnos"
-            >
-              <Clock size={16} />
-            </button>
-          </div>
 
           {/* Visual Novel Area (Active Message) */}
           <div className="absolute w-full bottom-0 px-6 pb-6 z-30 flex flex-col justify-end pointer-events-none">
@@ -611,8 +629,12 @@ export default function ChatUI() {
       <footer className="h-32 border-t border-[var(--border)] bg-[var(--surface)] flex items-center px-6 gap-6 z-20 relative shrink-0">
         
         {/* Character Stats */}
-        <div className="flex items-center gap-4 bg-[var(--surface-alt)] border border-[var(--border-light)] p-3 rounded-sm min-w-[260px] shadow-inner">
-          <div className="relative w-16 h-16 rounded-sm overflow-hidden border border-[var(--surface)] bg-[var(--border)]">
+        <button 
+          onClick={handleOpenEditStatus}
+          className="flex items-center gap-4 bg-[var(--surface-alt)] hover:bg-[var(--surface)] border border-[var(--border-light)] hover:border-[var(--glow)]/50 p-3 rounded-sm min-w-[260px] shadow-inner transition-colors text-left group"
+          title="Editar Estado (HP/Mana)"
+        >
+          <div className="relative w-16 h-16 rounded-sm overflow-hidden border border-[var(--surface)] bg-[var(--border)] group-hover:border-[var(--glow)]/30 transition-colors">
              <User size={24} className="text-[var(--text-muted)] absolute inset-0 m-auto" />
           </div>
           <div className="flex-1 flex flex-col justify-center gap-1.5">
@@ -626,7 +648,7 @@ export default function ChatUI() {
                 <span className="text-[var(--text-muted)]">{activeChatroomCharacter?.hp}/{activeChatroomCharacter?.max_hp}</span>
               </div>
               <div className="h-1 w-full bg-[var(--border)] rounded-none overflow-hidden">
-                <div className="h-full bg-[var(--danger)] w-full shadow-[0_0_5px_var(--danger)]"></div>
+                <div className="h-full bg-[var(--danger)] w-full shadow-[0_0_5px_var(--danger)]" style={{ width: `${Math.max(0, Math.min(100, ((activeChatroomCharacter?.hp || 0) / (activeChatroomCharacter?.max_hp || 1)) * 100))}%` }}></div>
               </div>
             </div>
             {/* Mana */}
@@ -636,7 +658,7 @@ export default function ChatUI() {
                 <span className="text-[var(--text-muted)]">{activeChatroomCharacter?.mana}/{activeChatroomCharacter?.max_mana}</span>
               </div>
               <div className="h-1 w-full bg-[var(--border)] rounded-none overflow-hidden">
-                <div className="h-full bg-[var(--glow)] w-full shadow-[0_0_5px_var(--glow)]"></div>
+                <div className="h-full bg-[var(--glow)] w-full shadow-[0_0_5px_var(--glow)]" style={{ width: `${Math.max(0, Math.min(100, ((activeChatroomCharacter?.mana || 0) / (activeChatroomCharacter?.max_mana || 1)) * 100))}%` }}></div>
               </div>
             </div>
           </div>
@@ -648,7 +670,7 @@ export default function ChatUI() {
               </div>
             </div>
           )}
-        </div>
+        </button>
 
         {/* Input Area */}
         <form className="flex-1 flex flex-col gap-3 h-full py-4" onSubmit={handleSendMessage}>
@@ -727,6 +749,34 @@ export default function ChatUI() {
           </div>
         </form>
 
+        {/* Paneles (Drawers) */}
+        <div className="flex flex-col gap-2 min-w-[140px] h-full py-4 justify-end border-r border-[var(--border)] pr-6">
+          <div className="text-[9px] font-bold tracking-[0.2em] text-[var(--text-muted)] uppercase text-center mb-0.5">PÁNELES</div>
+          <div className="flex justify-between gap-2">
+            <button 
+              onClick={() => { setIsHistoryOpen(!isHistoryOpen); setIsTurnOrderOpen(false); setIsResourcesOpen(false); }} 
+              className={`flex-1 h-9 rounded-sm flex items-center justify-center transition-all border ${isHistoryOpen ? 'bg-[var(--accent)] border-[var(--glow)] text-white shadow-[0_0_10px_var(--glow)]' : 'bg-[var(--surface-alt)] border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--glow)] hover:border-[var(--glow)]/50'}`}
+              title="Historial de Chat"
+            >
+              <MessageSquare size={14} />
+            </button>
+            <button 
+              onClick={() => { setIsResourcesOpen(!isResourcesOpen); setIsTurnOrderOpen(false); setIsHistoryOpen(false); }} 
+              className={`flex-1 h-9 rounded-sm flex items-center justify-center transition-all border ${isResourcesOpen ? 'bg-[var(--accent)] border-[var(--glow)] text-white shadow-[0_0_10px_var(--glow)]' : 'bg-[var(--surface-alt)] border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--glow)] hover:border-[var(--glow)]/50'}`}
+              title="Recursos"
+            >
+              <FolderOpen size={14} />
+            </button>
+            <button 
+              onClick={() => { setIsTurnOrderOpen(!isTurnOrderOpen); setIsResourcesOpen(false); setIsHistoryOpen(false); }} 
+              className={`flex-1 h-9 rounded-sm flex items-center justify-center transition-all border ${isTurnOrderOpen ? 'bg-[var(--accent)] border-[var(--glow)] text-white shadow-[0_0_10px_var(--glow)]' : 'bg-[var(--surface-alt)] border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--glow)] hover:border-[var(--glow)]/50'}`}
+              title="Orden de Turnos"
+            >
+              <Clock size={14} />
+            </button>
+          </div>
+        </div>
+
         {/* Actions */}
         <div className="flex flex-col gap-3 min-w-[160px] h-full py-4 justify-end">
           <button onClick={handleDiceRoll} className="flex items-center justify-center gap-2 bg-transparent hover:bg-[var(--accent)]/10 border border-[var(--accent)]/50 text-[var(--accent)] px-4 py-2.5 rounded-sm text-[10px] font-bold uppercase tracking-widest transition-all shadow-[0_0_10px_rgba(59,130,246,0.05)] hover:shadow-[0_0_15px_rgba(59,130,246,0.15)]">
@@ -779,6 +829,78 @@ export default function ChatUI() {
                >
                 Abandonar Sala
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Status Modal */}
+      {isEditStatusModalOpen && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="w-full max-w-sm bg-[var(--surface)] border border-[var(--border)] rounded-sm shadow-2xl flex flex-col overflow-hidden">
+            <div className="p-5 border-b border-[var(--border)] flex justify-between items-center bg-[var(--surface-alt)]">
+              <h2 className="text-xs font-bold text-[var(--text)] tracking-widest uppercase">Modificar Estado</h2>
+              <button onClick={() => setIsEditStatusModalOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text)]">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+               <div className="flex flex-col gap-2">
+                 <label className="text-[10px] font-bold tracking-widest text-[var(--danger)] uppercase">Health Points (HP)</label>
+                 <div className="flex items-center gap-3">
+                   <input 
+                     type="number" 
+                     value={editHp}
+                     onChange={(e) => {
+                       const val = Number(e.target.value);
+                       setEditHp(Math.min(Math.max(0, val), activeChatroomCharacter?.max_hp || 0));
+                     }}
+                     className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-mono text-lg rounded-sm p-3 outline-none focus:border-[var(--danger)] transition-colors text-center"
+                   />
+                   <span className="text-[var(--text-muted)] font-mono text-sm whitespace-nowrap">/ {activeChatroomCharacter?.max_hp}</span>
+                 </div>
+               </div>
+
+               <div className="flex flex-col gap-2">
+                 <label className="text-[10px] font-bold tracking-widest text-[var(--glow)] uppercase">Mana Points (MP)</label>
+                 <div className="flex items-center gap-3">
+                   <input 
+                     type="number" 
+                     value={editMana}
+                     onChange={(e) => {
+                       const val = Number(e.target.value);
+                       setEditMana(Math.min(Math.max(0, val), activeChatroomCharacter?.max_mana || 0));
+                     }}
+                     className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-mono text-lg rounded-sm p-3 outline-none focus:border-[var(--glow)] transition-colors text-center"
+                   />
+                   <span className="text-[var(--text-muted)] font-mono text-sm whitespace-nowrap">/ {activeChatroomCharacter?.max_mana}</span>
+                 </div>
+               </div>
+            </div>
+            <div className="p-5 border-t border-[var(--border)] bg-[var(--surface-alt)] flex justify-between items-center gap-4">
+              <button 
+                onClick={handleSyncStats}
+                disabled={isSyncing}
+                title="Restaurar HP/Mana al máximo (Sincronizar Vault)"
+                className="w-10 h-10 flex items-center justify-center shrink-0 border border-[var(--glow)]/30 text-[var(--glow)] hover:bg-[var(--glow)]/10 rounded-sm transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
+              </button>
+              
+              <div className="flex w-full sm:w-auto gap-3 justify-end shrink-0">
+                <button 
+                  onClick={() => setIsEditStatusModalOpen(false)}
+                  className="px-4 py-2 border border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--text)] rounded-sm text-[10px] font-bold uppercase tracking-widest transition-colors"
+                  >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={handleSaveStatus}
+                  className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-sm text-[10px] font-bold uppercase tracking-widest transition-colors shadow-[0_0_10px_var(--glow)]"
+                 >
+                  Guardar
+                </button>
+              </div>
             </div>
           </div>
         </div>

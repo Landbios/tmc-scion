@@ -6,8 +6,12 @@ export interface VaultCharacter {
   user_id: string;
   name: string;
   image_url: string;
-  hp?: number; // These will be used for chatroom instances
-  mana?: number;
+  offensive_power?: string;
+  defensive_power?: string;
+  mana_amount?: string;
+  mana_control?: string;
+  physical_ability?: string;
+  luck?: string;
 }
 
 export interface ChatroomCharacter {
@@ -45,6 +49,8 @@ interface CharacterState {
   leaveChatroom: (chatroomId: string, userId: string) => Promise<boolean>;
   setActiveCharacter: (charId: string) => void;
   addSprite: (vaultCharId: string, name: string, imageUrl: string) => Promise<boolean>;
+  updateCharacterStatus: (charId: string, hp: number, mana: number) => Promise<boolean>;
+  syncCharacterStats: (charId: string, vaultCharId: string) => Promise<boolean>;
 }
 
 export const useCharacterStore = create<CharacterState>((set, get) => ({
@@ -58,7 +64,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     const supabase = createClient();
     const { data, error } = await supabase
       .from('characters')
-      .select('id, user_id, name, image_url')
+      .select('id, user_id, name, image_url, offensive_power, defensive_power, mana_amount, mana_control, physical_ability, luck')
       .eq('user_id', userId);
 
     if (!error && data) {
@@ -106,15 +112,41 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     set({ isLoading: true });
     const supabase = createClient();
     
+    // Calculate Max HP and Max Mana based on formulas
+    const getBaseHp = (grade?: string) => {
+      switch (grade) {
+        case 'S': return 210; case 'A': return 195; case 'B': return 180;
+        case 'C': return 145; case 'D': return 130; case 'E': return 115; case 'F': return 100;
+        default: return 100;
+      }
+    };
+    const getBonusHp = (grade?: string) => {
+      switch (grade) {
+        case 'S': return 40; case 'A': return 35; case 'B': return 30;
+        case 'C': return 25; case 'D': return 20; case 'E': return 15; case 'F': return 10;
+        default: return 10;
+      }
+    };
+    const getMaxMana = (grade?: string) => {
+      switch (grade) {
+        case 'S': return 110; case 'A': return 100; case 'B': return 90;
+        case 'C': return 80; case 'D': return 70; case 'E': return 60; case 'F': return 50;
+        default: return 100;
+      }
+    };
+
+    const maxHp = getBaseHp(vaultChar.physical_ability) + getBonusHp(vaultChar.defensive_power);
+    const maxMana = getMaxMana(vaultChar.mana_amount);
+
     const newCharData = {
       chatroom_id: chatroomId,
       owner_id: userId,
       vault_character_id: vaultChar.id,
       name: vaultChar.name,
-      hp: 100,
-      max_hp: 100,
-      mana: 100,
-      max_mana: 100,
+      hp: maxHp,
+      max_hp: maxHp,
+      mana: maxMana,
+      max_mana: maxMana,
       advantage_status: 'normal',
     };
 
@@ -162,6 +194,93 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       myChatroomCharacters: [],
       activeChatroomCharacter: null, 
       isLoading: false 
+    });
+    return true;
+  },
+  updateCharacterStatus: async (charId: string, hp: number, mana: number) => {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from('chatroom_characters')
+      .update({ hp, mana })
+      .eq('id', charId);
+
+    if (error) {
+      console.error('Error updating character status:', error);
+      return false;
+    }
+
+    set(state => {
+      if (state.activeChatroomCharacter?.id === charId) {
+        const updatedChar = { ...state.activeChatroomCharacter, hp, mana };
+        return {
+          activeChatroomCharacter: updatedChar,
+          myChatroomCharacters: state.myChatroomCharacters.map(c => c.id === charId ? updatedChar : c)
+        };
+      }
+      return {
+        myChatroomCharacters: state.myChatroomCharacters.map(c => c.id === charId ? { ...c, hp, mana } : c)
+      };
+    });
+    return true;
+  },
+  syncCharacterStats: async (charId: string, vaultCharId: string) => {
+    const supabase = createClient();
+    
+    // Fetch latest from vault
+    const { data: vaultChar, error: fetchErr } = await supabase
+      .from('characters')
+      .select('offensive_power, defensive_power, mana_amount, mana_control, physical_ability, luck')
+      .eq('id', vaultCharId)
+      .single();
+
+    if (fetchErr || !vaultChar) return false;
+
+    // Calculate Max HP and Max Mana based on formulas
+    const getBaseHp = (grade?: string) => {
+      switch (grade) {
+        case 'S': return 210; case 'A': return 195; case 'B': return 180;
+        case 'C': return 145; case 'D': return 130; case 'E': return 115; case 'F': return 100;
+        default: return 100;
+      }
+    };
+    const getBonusHp = (grade?: string) => {
+      switch (grade) {
+        case 'S': return 40; case 'A': return 35; case 'B': return 30;
+        case 'C': return 25; case 'D': return 20; case 'E': return 15; case 'F': return 10;
+        default: return 10;
+      }
+    };
+    const getMaxMana = (grade?: string) => {
+      switch (grade) {
+        case 'S': return 110; case 'A': return 100; case 'B': return 90;
+        case 'C': return 80; case 'D': return 70; case 'E': return 60; case 'F': return 50;
+        default: return 100;
+      }
+    };
+
+    const maxHp = getBaseHp(vaultChar.physical_ability) + getBonusHp(vaultChar.defensive_power);
+    const maxMana = getMaxMana(vaultChar.mana_amount);
+
+    // Update in DB
+    const { error: updateErr } = await supabase
+      .from('chatroom_characters')
+      .update({ max_hp: maxHp, max_mana: maxMana })
+      .eq('id', charId);
+
+    if (updateErr) return false;
+
+    // Fast Forward in UI
+    set(state => {
+      if (state.activeChatroomCharacter?.id === charId) {
+        const updatedChar = { ...state.activeChatroomCharacter, max_hp: maxHp, max_mana: maxMana };
+        return {
+          activeChatroomCharacter: updatedChar,
+          myChatroomCharacters: state.myChatroomCharacters.map(c => c.id === charId ? updatedChar : c)
+        };
+      }
+      return {
+        myChatroomCharacters: state.myChatroomCharacters.map(c => c.id === charId ? { ...c, max_hp: maxHp, max_mana: maxMana } : c)
+      };
     });
     return true;
   },
