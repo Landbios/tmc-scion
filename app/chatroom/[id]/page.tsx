@@ -28,13 +28,16 @@ import ImageUploader from '@/components/ImageUploader';
 
 // --- Subcomponents ---
 
-const Message = ({ sender, time, text, color }: { sender: string, time: string, text: string, color?: string }) => (
-  <div className="bg-[var(--surface-alt)] border border-[var(--border-light)] rounded-sm p-3">
+const Message = ({ sender, time, text, color, isWhisper, targetName }: { sender: string, time: string, text: string, color?: string, isWhisper?: boolean, targetName?: string }) => (
+  <div className={`bg-[var(--surface-alt)] border ${isWhisper ? 'border-[var(--glow)] shadow-inner' : 'border-[var(--border-light)]'} rounded-sm p-3 relative`}>
     <div className="flex justify-between items-baseline mb-1">
-      <span className={`text-xs font-bold ${color || 'text-[var(--accent)]'}`}>{sender}</span>
+      <div className="flex items-center gap-2">
+        <span className={`text-xs font-bold ${color || 'text-[var(--accent)]'}`}>{sender}</span>
+        {isWhisper && <span className="text-[9px] px-1.5 py-0.5 bg-[var(--glow)]/10 text-[var(--glow)] border border-[var(--glow)]/30 rounded-sm font-mono uppercase">Susurrando a {targetName || 'Alguien'}</span>}
+      </div>
       <span className="mono-label">{time}</span>
     </div>
-    <p className="text-sm text-[var(--text)]">{text}</p>
+    <p className={`text-sm ${isWhisper ? 'text-[var(--glow)]/90 italic' : 'text-[var(--text)]'}`}>{text}</p>
   </div>
 );
 
@@ -110,6 +113,10 @@ export default function ChatUI() {
   const [isUploadingSprite, setIsUploadingSprite] = useState(false);
   const [chatroomBgUrl, setChatroomBgUrl] = useState<string | null>(null);
 
+  // Whisper / Target state
+  const [chatters, setChatters] = useState<{id: string, username: string}[]>([]);
+  const [selectedTargetUserId, setSelectedTargetUserId] = useState<string | null>(null);
+
   const handleAddSprite = async () => {
     if (!activeChatroomCharacter?.vault_character_id || !newSpriteName || !newSpriteUrl) return;
     setIsUploadingSprite(true);
@@ -170,7 +177,8 @@ export default function ChatUI() {
     fetchMessages, 
     subscribeToMessages, 
     unsubscribeFromMessages, 
-    sendMessage 
+    sendMessage,
+    activeSubscription
   } = useMessageStore();
 
   const [messageInput, setMessageInput] = useState('');
@@ -188,7 +196,7 @@ export default function ChatUI() {
     } else {
        setSelectedSpriteId(null);
     }
-  }, [activeCharacterSprites]);
+  }, [activeCharacterSprites, selectedSpriteId]);
 
   useEffect(() => {
     if (user && id) {
@@ -200,23 +208,32 @@ export default function ChatUI() {
       };
       fetchBg();
 
-      checkJoinedStatus(id as string, user.id).then((hasJoined) => {
+      if (!activeSubscription) {
+        subscribeToMessages(id as string, user.id);
+        fetchMessages(id as string, user.id);
+      }
+
+      const verifyJoin = async () => {
+        const hasJoined = await checkJoinedStatus(id as string, user.id);
         if (!hasJoined) {
-          fetchVaultCharacters(user.id);
-        } else {
-          // If already joined, fetch and sub
-          fetchMessages(id as string);
-          subscribeToMessages(id as string);
+          if (vaultCharacters.length === 0) fetchVaultCharacters(user.id);
         }
         setIsChecking(false);
-      });
-    }
+      };
+      verifyJoin();
 
-    return () => {
-      unsubscribeFromMessages();
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, id]);
+      // Fetch chatters for whisper targeting
+      const fetchChattersForMaster = async () => {
+        const supabase = createClient();
+        const { data } = await supabase.from('chatrooms').select('chatters_ids').eq('id', id).single();
+        if(data && data.chatters_ids && data.chatters_ids.length > 0) {
+           const { data: users } = await supabase.from('profiles').select('id, username').in('id', data.chatters_ids);
+           if(users) setChatters(users);
+        }
+      };
+      fetchChattersForMaster();
+    }
+  }, [id, user, subscribeToMessages, fetchMessages, checkJoinedStatus, activeSubscription, fetchVaultCharacters, vaultCharacters.length]);
 
   // When successfully joined from the modal, we must sub and fetch
   const handleJoin = async (char: any) => {
@@ -225,8 +242,8 @@ export default function ChatUI() {
       setIsAddCharacterModalOpen(false);
       // Fetch and sub only if we weren't already in the room
       if (myChatroomCharacters.length === 0) {
-        fetchMessages(id as string);
-        subscribeToMessages(id as string);
+        fetchMessages(id as string, user!.id);
+        subscribeToMessages(id as string, user!.id);
       }
     }
   };
@@ -257,18 +274,26 @@ export default function ChatUI() {
     if (!messageInput.trim() || !activeChatroomCharacter || !user) return;
     
     // Safety check: ensure we actually send a valid sprite ID if one is available
-    const actualSpriteId = selectedSpriteId || (activeCharacterSprites.length > 0 ? activeCharacterSprites[0].id : null);
+    if (activeChatroomCharacter) {
+      const isMaster = activeChatroomCharacter.name === 'TMC: Master';
+      
+      const success = await sendMessage({
+        chatroom_id: id as string,
+        sender_id: user.id,
+        character_id: isMaster ? null : activeChatroomCharacter.id, // Only use actual character IDs
+        sprite_id: selectedSpriteId || null,
+        content: messageInput,
+        is_system_message: isMaster && !selectedTargetUserId,
+        is_dm_whisper: isMaster && !!selectedTargetUserId,
+        target_user_id: isMaster ? selectedTargetUserId : null
+      });
 
-    await sendMessage({
-      chatroom_id: id as string,
-      sender_id: user.id,
-      character_id: activeChatroomCharacter.id,
-      sprite_id: actualSpriteId,
-      content: messageInput,
-      is_system_message: false,
-    });
-    
-    setMessageInput('');
+      if (success) {
+        setMessageInput('');
+      } else {
+        alert("Error al enviar el mensaje.");
+      }
+    }
   };
 
   const handleDiceRoll = async () => {
@@ -314,7 +339,7 @@ export default function ChatUI() {
                   className="bg-[var(--surface-alt)] hover:bg-[var(--surface)] border border-[var(--border-light)] hover:border-[var(--glow)]/50 p-5 rounded-sm flex flex-col items-center gap-4 transition-all shadow-lg hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] group"
                 >
                   <div className="w-24 h-24 relative rounded-full overflow-hidden border-2 border-[var(--surface)] bg-[var(--border)] group-hover:border-[var(--glow)]/30 transition-colors flex items-center justify-center">
-                     {char.image_url ? <img src={char.image_url} alt={char.name} className="object-cover w-full h-full" /> : <User size={32} className="text-[var(--text-muted)] absolute inset-0 m-auto" />}
+                     {char.image_url ? <Image src={char.image_url} alt={char.name} fill className="object-cover" /> : <User size={32} className="text-[var(--text-muted)] absolute inset-0 m-auto" />}
                   </div>
                   <span className="font-bold text-sm text-[var(--text)] font-serif text-center line-clamp-2">{char.name}</span>
                   <span className="text-[9px] mono-label group-hover:text-[var(--glow)] uppercase tracking-wider">Elegir</span>
@@ -350,7 +375,7 @@ export default function ChatUI() {
                           className="bg-[var(--surface-alt)] hover:bg-[var(--surface)] border border-[var(--border-light)] hover:border-[var(--glow)]/50 p-4 rounded-sm flex flex-col items-center gap-3 transition-all group"
                         >
                           <div className="w-16 h-16 relative rounded-full overflow-hidden border-2 border-[var(--surface)] bg-[var(--border)] flex items-center justify-center">
-                             {char.image_url ? <img src={char.image_url} alt={char.name} className="object-cover w-full h-full" /> : <User size={24} className="text-[var(--text-muted)]" />}
+                             {char.image_url ? <Image src={char.image_url} alt={char.name} fill className="object-cover" /> : <User size={24} className="text-[var(--text-muted)]" />}
                           </div>
                           <span className="font-bold text-xs text-[var(--text)] font-serif text-center line-clamp-1">{char.name}</span>
                         </button>
@@ -415,9 +440,9 @@ export default function ChatUI() {
 
       {/* Background Image & Pattern */}
       {chatroomBgUrl && (
-        <div className="absolute inset-0 z-0">
-           <img src={chatroomBgUrl} alt="Room Background" className="w-full h-full object-cover opacity-30 grayscale-[50%]" />
-        </div>
+          <div className="absolute inset-0 z-0 opacity-30 grayscale-[50%]">
+             <Image src={chatroomBgUrl} alt="Room Background" fill className="object-cover" />
+          </div>
       )}
       <div className="absolute inset-0 pointer-events-none z-0 grid-overlay"></div>
       
@@ -476,11 +501,14 @@ export default function ChatUI() {
                   {!isSystem && (
                     <div className="absolute bottom-full right-[10%] w-[450px] h-[600px] pointer-events-auto transition-all animate-in fade-in slide-in-from-bottom-5 z-20">
                       {lastMsg.character_sprites?.image_url ? (
-                        <img 
-                          src={lastMsg.character_sprites.image_url} 
-                          alt={speakerName} 
-                          className="object-contain w-full h-full drop-shadow-[0_0_20px_rgba(0,0,0,0.8)]" 
-                        />
+                        <div className="w-full h-full relative">
+                          <Image 
+                            src={lastMsg.character_sprites.image_url} 
+                            alt={speakerName} 
+                            fill
+                            className="object-contain drop-shadow-[0_0_20px_rgba(0,0,0,0.8)]" 
+                          />
+                        </div>
                       ) : (
                         <div className="w-full h-full flex justify-center items-end pb-10">
                            <User size={200} className="text-[var(--text-muted)] opacity-50 drop-shadow-[0_0_20px_rgba(0,0,0,0.8)]" />
@@ -536,7 +564,7 @@ export default function ChatUI() {
                   if (msg.dice_result) {
                     return <DiceMessage key={msg.id} sender={senderName} time={time} text={msg.content} result={msg.dice_result.roll.toString()} color={color} />
                   }
-                  return <Message key={msg.id} sender={senderName} time={time} text={msg.content} color={color} />
+                  return <Message key={msg.id} sender={senderName} time={time} text={msg.content} color={color} isWhisper={msg.is_dm_whisper} targetName={msg.target_profile?.username} />
                 })
               )}
               <div ref={messagesEndRef} />
@@ -702,6 +730,23 @@ export default function ChatUI() {
                <ImagePlus size={14} />
             </button>
 
+            {/* Target Selector (Master Only) */}
+            {activeChatroomCharacter?.name === 'TMC: Master' && (
+               <div className="relative animate-in fade-in slide-in-from-bottom-2">
+                 <select 
+                     value={selectedTargetUserId || ''} 
+                     onChange={e => setSelectedTargetUserId(e.target.value)}
+                     className="bg-[var(--surface-alt)] border border-[var(--glow)]/30 text-[var(--glow)] text-[10px] uppercase tracking-wider font-bold rounded-sm px-3 py-1.5 outline-none focus:border-[var(--glow)] appearance-none min-w-[200px] pr-8 cursor-pointer hover:bg-[var(--glow)]/10 transition-colors shadow-[0_0_10px_rgba(59,130,246,0.1)] truncate"
+                 >
+                     <option value="">Narrativa General</option>
+                     {chatters.map(c => <option key={c.id} value={c.id}>Susurro: {c.username}</option>)}
+                 </select>
+                 <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--glow)]">
+                    <User size={12} />
+                 </div>
+               </div>
+            )}
+
             {/* Character Switcher */}
             <div className="relative">
               <select 
@@ -730,22 +775,23 @@ export default function ChatUI() {
                <Plus size={14} />
             </button>
           </div>
+
           <div className="flex-1 relative flex items-end gap-2">
-            <textarea 
-              value={messageInput}
-              onChange={e => setMessageInput(e.target.value)}
-              onKeyDown={(e) => {
-                if(e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendMessage(e);
-                }
-              }}
-              className="w-full h-full bg-[var(--surface-alt)] border border-[var(--border-light)] rounded-sm p-3 pr-12 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] resize-none outline-none focus:border-[var(--glow)]/50 focus:ring-1 focus:ring-[var(--glow)]/50 custom-scrollbar transition-all font-mono"
-              placeholder="Escribe tu mensaje... (Enter para enviar)"
-            ></textarea>
-            <button type="submit" className="absolute right-2 bottom-2 p-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-sm transition-colors shadow-[0_0_10px_var(--glow)]">
-              <Send size={14} />
-            </button>
+              <textarea 
+                value={messageInput}
+                onChange={e => setMessageInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if(e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage(e);
+                  }
+                }}
+                className={`w-full h-full bg-[var(--surface-alt)] border ${activeChatroomCharacter?.name === 'TMC: Master' && selectedTargetUserId ? 'border-[var(--glow)] focus:ring-[var(--glow)]' : 'border-[var(--border-light)] focus:ring-[var(--glow)]/50'} rounded-sm p-3 pr-12 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] resize-none outline-none focus:ring-1 custom-scrollbar transition-all font-mono`}
+                placeholder={activeChatroomCharacter?.name === 'TMC: Master' && selectedTargetUserId ? `Escribiendo susurro oculto...` : "Escribe tu mensaje... (Enter para enviar)"}
+              ></textarea>
+              <button type="submit" className="absolute right-2 bottom-2 p-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-sm transition-colors shadow-[0_0_10px_var(--glow)]">
+                <Send size={14} />
+              </button>
           </div>
         </form>
 
@@ -815,9 +861,9 @@ export default function ChatUI() {
                 <h3 className="mono-label mb-3">Participantes</h3>
                 <div className="flex -space-x-2">
                   {[1,2,3,4].map(i => (
-                    <div key={i} className="w-8 h-8 rounded-sm border-2 border-[var(--surface)] overflow-hidden relative">
-                      <Image src={`https://picsum.photos/seed/user${i}/100/100`} alt="User" fill className="object-cover" />
-                    </div>
+                          <div key={i} className="w-8 h-8 rounded-sm border-2 border-[var(--surface)] overflow-hidden relative">
+                            <Image src={`https://picsum.photos/seed/user${i}/100/100`} alt="User" fill className="object-cover" />
+                          </div>
                   ))}
                 </div>
               </div>

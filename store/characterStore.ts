@@ -88,6 +88,31 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
   checkJoinedStatus: async (chatroomId, userId) => {
     set({ isLoading: true });
     const supabase = createClient();
+    
+    // First, check if the user is a master/creator of the chatroom
+    const { data: roomData, error: roomError } = await supabase
+      .from('chatrooms')
+      .select('creator_id, masters_ids')
+      .eq('id', chatroomId)
+      .single();
+
+    let isMaster = false;
+    if (!roomError && roomData) {
+      isMaster = roomData.creator_id === userId || (roomData.masters_ids && roomData.masters_ids.includes(userId));
+    }
+
+    const masterChar: ChatroomCharacter | null = isMaster ? {
+      id: `master-${userId}`,
+      chatroom_id: chatroomId,
+      owner_id: userId,
+      vault_character_id: '',
+      name: 'TMC: Master',
+      hp: 9999, max_hp: 9999, mana: 9999, max_mana: 9999,
+      advantage_status: 'normal',
+      default_sprite_id: null
+    } : null;
+
+    // Check their regular joined characters
     const { data, error } = await supabase
       .from('chatroom_characters')
       .select('*')
@@ -96,12 +121,20 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
     if (!error && data && data.length > 0) {
       const chars = data as ChatroomCharacter[];
+      if (masterChar) chars.unshift(masterChar);
+
       const firstChar = chars[0];
       // Fetch sprites if found
       if (firstChar.vault_character_id) {
         get().fetchCharacterSprites(firstChar.vault_character_id);
+      } else {
+        set({ activeCharacterSprites: [] }); // Reset sprites if it's the master
       }
       set({ myChatroomCharacters: chars, activeChatroomCharacter: firstChar, isLoading: false });
+      return true;
+    } else if (masterChar) {
+      // User is a master but has no regular characters joined. Let them use the Master!
+      set({ myChatroomCharacters: [masterChar], activeChatroomCharacter: masterChar, activeCharacterSprites: [], isLoading: false });
       return true;
     }
     

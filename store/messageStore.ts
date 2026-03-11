@@ -11,6 +11,7 @@ export interface MessageRecord {
   content: string;
   is_system_message: boolean;
   is_dm_whisper: boolean;
+  target_user_id: string | null;
   dice_result: { roll: number, type: string } | null;
   created_at: string;
   
@@ -18,6 +19,7 @@ export interface MessageRecord {
   chatroom_characters?: { name: string; advantage_status: string };
   character_sprites?: { name: string; image_url: string };
   profiles?: { username: string; role: string };
+  target_profile?: { username: string };
 }
 
 interface MessageState {
@@ -25,9 +27,9 @@ interface MessageState {
   isLoading: boolean;
   activeSubscription: RealtimeChannel | null;
   
-  fetchMessages: (chatroomId: string) => Promise<void>;
+  fetchMessages: (chatroomId: string, currentUserId: string) => Promise<void>;
   sendMessage: (payload: Partial<MessageRecord>) => Promise<boolean>;
-  subscribeToMessages: (chatroomId: string) => void;
+  subscribeToMessages: (chatroomId: string, currentUserId: string) => void;
   unsubscribeFromMessages: () => void;
 }
 
@@ -36,7 +38,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   isLoading: true,
   activeSubscription: null,
 
-  fetchMessages: async (chatroomId: string) => {
+  fetchMessages: async (chatroomId: string, currentUserId: string) => {
     set({ isLoading: true });
     const supabase = createClient();
     
@@ -47,9 +49,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         *,
         chatroom_characters ( name, advantage_status ),
         character_sprites ( name, image_url ),
-        profiles:sender_id ( username, role )
+        profiles:sender_id ( username, role ),
+        target_profile:target_user_id ( username )
       `)
       .eq('chatroom_id', chatroomId)
+      .or(`target_user_id.is.null,target_user_id.eq.${currentUserId},sender_id.eq.${currentUserId}`)
       .order('created_at', { ascending: true })
       .limit(50);
 
@@ -77,7 +81,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     return true;
   },
 
-  subscribeToMessages: (chatroomId: string) => {
+  subscribeToMessages: (chatroomId: string, currentUserId: string) => {
     const supabase = createClient();
     
     // Cleanup existing subs just in case
@@ -102,16 +106,21 @@ export const useMessageStore = create<MessageState>((set, get) => ({
                 *,
                 chatroom_characters ( name, advantage_status ),
                 character_sprites ( name, image_url ),
-                profiles:sender_id ( username, role )
+                profiles:sender_id ( username, role ),
+                target_profile:target_user_id ( username )
               `)
               .eq('id', payload.new.id)
               .single();
               
             if (!error && data) {
-               set((state) => {
-                 if (state.messages.some(m => m.id === data.id)) return state;
-                 return { messages: [...state.messages, data as unknown as MessageRecord] };
-               });
+               // Only push to state if the message is public, or we are the target/sender
+               const msg = data as unknown as MessageRecord;
+               if (!msg.target_user_id || msg.target_user_id === currentUserId || msg.sender_id === currentUserId) {
+                 set((state) => {
+                   if (state.messages.some(m => m.id === msg.id)) return state;
+                   return { messages: [...state.messages, msg] };
+                 });
+               }
             }
           }, 300); // 300ms delay
         }
