@@ -298,7 +298,13 @@ export default function ChatroomPage() {
         position_y: newSpritePositionY
       });
     } else {
-      success = await useCharacterStore.getState().addSprite(activeChatroomCharacter.vault_character_id, newSpriteName, newSpriteUrl);
+      success = await useCharacterStore.getState().addSprite(
+        activeChatroomCharacter.vault_character_id, 
+        newSpriteName, 
+        newSpriteUrl,
+        newSpriteScale,
+        newSpritePositionY
+      );
     }
 
     if (success) {
@@ -483,10 +489,12 @@ export default function ChatroomPage() {
     let isMounted = true;
 
     const initRoom = async () => {
-      if (!useMessageStore.getState().activeSubscription) {
-        subscribeToMessages(id as string, user.id);
-        fetchMessages(id as string, user.id);
+      if (useMessageStore.getState().activeSubscription) {
+        unsubscribeFromMessages();
       }
+      
+      subscribeToMessages(id as string, user.id);
+      fetchMessages(id as string, user.id);
 
       const hasJoined = await checkJoinedStatus(id as string, user.id);
       if (!hasJoined && isMounted) {
@@ -504,7 +512,7 @@ export default function ChatroomPage() {
     return () => {
       isMounted = false;
     };
-  }, [id, user, subscribeToMessages, fetchMessages, checkJoinedStatus, fetchVaultCharacters]);
+  }, [id, user, subscribeToMessages, fetchMessages, checkJoinedStatus, fetchVaultCharacters, unsubscribeFromMessages]);
 
   // When successfully joined from the modal, we must sub and fetch
   const handleJoin = async (char: any) => {

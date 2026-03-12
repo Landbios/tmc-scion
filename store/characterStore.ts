@@ -50,7 +50,7 @@ interface CharacterState {
   joinChatroom: (chatroomId: string, userId: string, vaultChar: VaultCharacter) => Promise<boolean>;
   leaveChatroom: (chatroomId: string, userId: string) => Promise<boolean>;
   setActiveCharacter: (charId: string) => void;
-  addSprite: (vaultCharId: string, name: string, imageUrl: string) => Promise<boolean>;
+  addSprite: (vaultCharId: string, name: string, imageUrl: string, scale?: number, positionY?: number) => Promise<boolean>;
   updateSprite: (spriteId: string, updates: Partial<CharacterSprite>) => Promise<boolean>;
   deleteSprite: (spriteId: string) => Promise<boolean>;
   updateCharacterStatus: (charId: string, hp: number, mana: number) => Promise<boolean>;
@@ -331,12 +331,14 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       set({ activeChatroomCharacter: char });
     }
   },
-  addSprite: async (vaultCharId: string, name: string, imageUrl: string) => {
+  addSprite: async (vaultCharId: string, name: string, imageUrl: string, scale?: number, positionY?: number) => {
     const supabase = createClient();
     const { error } = await supabase.from('character_sprites').insert([{
       character_id: vaultCharId,
       name,
-      image_url: imageUrl
+      image_url: imageUrl,
+      scale: scale ?? 1.0,
+      position_y: positionY ?? 0.0
     }]);
     if (!error) {
        get().fetchCharacterSprites(vaultCharId);

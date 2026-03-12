@@ -13,15 +13,7 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'picsum.photos',
-        port: '',
-        pathname: '/**', // This allows any path under the hostname
-      },
-      {
-        protocol: 'https',
-        hostname: 'oiwxjmvalaspjimdqtob.supabase.co',
-        port: '',
-        pathname: '/storage/v1/object/public/**', // Restrict to public storage bucket
+        hostname: '**',
       },
     ],
   },
