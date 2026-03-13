@@ -12,6 +12,7 @@ export interface VaultCharacter {
   mana_control?: string;
   physical_ability?: string;
   luck?: string;
+  is_npc?: boolean;
 }
 
 export interface ChatroomCharacter {
@@ -66,10 +67,20 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
   fetchVaultCharacters: async (userId) => {
     set({ isLoading: true });
     const supabase = createClient();
-    const { data, error } = await supabase
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', userId).single();
+    const isStaff = profile?.role === 'staff' || profile?.role === 'superadmin';
+
+    let query = supabase
       .from('characters')
-      .select('id, user_id, name, image_url, offensive_power, defensive_power, mana_amount, mana_control, physical_ability, luck')
-      .eq('user_id', userId);
+      .select('id, user_id, name, image_url, offensive_power, defensive_power, mana_amount, mana_control, physical_ability, luck, is_npc');
+
+    if (isStaff) {
+      query = query.or(`user_id.eq.${userId},is_npc.eq.true`);
+    } else {
+      query = query.eq('user_id', userId);
+    }
+
+    const { data, error } = await query;
 
     if (!error && data) {
       set({ vaultCharacters: data as VaultCharacter[], isLoading: false });

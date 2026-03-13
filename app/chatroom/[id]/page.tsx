@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { useAuthStore } from '@/store/authStore';
+import React, { useState, useEffect, useRef, useMemo, memo, useCallback } from 'react';
+import { useAuthStore, Profile } from '@/store/authStore';
 import { useCharacterStore, CharacterSprite } from '@/store/characterStore';
 import { useMessageStore } from '@/store/messageStore';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { maskEmail } from '@/lib/utils';
 import { 
   ChevronLeft, 
   MoreVertical, 
@@ -24,14 +25,17 @@ import {
   RefreshCw,
   Maximize2,
   Trash2,
-  Pencil
+  Pencil,
+  Play,
+  Pause,
+  RotateCcw
 } from 'lucide-react';
 import Image from 'next/image';
 import ImageUploader from '@/components/ImageUploader';
 
 // --- Subcomponents ---
 
-const Message = ({ sender, time, text, color, isWhisper, targetName }: { sender: string, time: string, text: string, color?: string, isWhisper?: boolean, targetName?: string }) => (
+const Message = memo(({ sender, time, text, color, isWhisper, targetName }: { sender: string, time: string, text: string, color?: string, isWhisper?: boolean, targetName?: string }) => (
   <div className={`bg-[var(--surface-alt)] border ${isWhisper ? 'border-[var(--glow)] shadow-inner' : 'border-[var(--border-light)]'} rounded-sm p-3 relative`}>
     <div className="flex justify-between items-baseline mb-1">
       <div className="flex items-center gap-2">
@@ -42,9 +46,10 @@ const Message = ({ sender, time, text, color, isWhisper, targetName }: { sender:
     </div>
     <p className={`text-sm ${isWhisper ? 'text-[var(--glow)]/90 italic' : 'text-[var(--text)]'}`}>{text}</p>
   </div>
-);
+));
+Message.displayName = 'Message';
 
-const DiceMessage = ({ sender, time, text, result, color }: { sender: string, time: string, text: string, result: string, color?: string }) => (
+const DiceMessage = memo(({ sender, time, text, result, color }: { sender: string, time: string, text: string, result: string, color?: string }) => (
   <div className="bg-[var(--surface-alt)] border border-[var(--border-light)] rounded-sm p-3">
     <div className="flex justify-between items-baseline mb-1">
       <span className={`text-xs font-bold ${color || 'text-[var(--accent)]'}`}>{sender}</span>
@@ -57,7 +62,8 @@ const DiceMessage = ({ sender, time, text, result, color }: { sender: string, ti
       </div>
     </div>
   </div>
-);
+));
+DiceMessage.displayName = 'DiceMessage';
 
 const TurnItem = ({ name, status, initiative, isActive = false }: { name: string, status: string, initiative: string, isActive?: boolean }) => (
   <div className={`flex items-center justify-between p-2.5 rounded-sm border ${isActive ? 'bg-[var(--accent)]/10 border-[var(--accent)]' : 'bg-[var(--surface-alt)] border-[var(--border-light)]'}`}>
@@ -125,12 +131,37 @@ export default function ChatroomPage() {
   const [isEditStatusModalOpen, setIsEditStatusModalOpen] = useState(false);
   const [editHp, setEditHp] = useState(0);
   const [editMana, setEditMana] = useState(0);
+  const [editName, setEditName] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [volume, setVolume] = useState(0.5);
+  const [isBgmReady, setIsBgmReady] = useState(false);
+  
+  // Masters search/add
+  const [newMasterId, setNewMasterId] = useState('');
+  const [isAddingMaster, setIsAddingMaster] = useState(false);
+  const [staffProfiles, setStaffProfiles] = useState<Profile[]>([]);
+  const [isFetchingStaff, setIsFetchingStaff] = useState(false);
   const [newSpriteName, setNewSpriteName] = useState('');
   const [newSpriteUrl, setNewSpriteUrl] = useState('');
   const [newSpriteScale, setNewSpriteScale] = useState(1.0);
   const [newSpritePositionY, setNewSpritePositionY] = useState(0.0);
+  const [bgmInput, setBgmInput] = useState('');
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isUploadingSprite, setIsUploadingSprite] = useState(false);
+  
+  const messages = useMessageStore(state => state.messages);
+  const fetchMessages = useMessageStore(state => state.fetchMessages);
+  const loadMoreMessages = useMessageStore(state => state.loadMoreMessages);
+  const hasMoreMessages = useMessageStore(state => state.hasMoreMessages);
+  const isLoadingMore = useMessageStore(state => state.isLoadingMore);
+  const subscribeToMessages = useMessageStore(state => state.subscribeToMessages);
+  const unsubscribeFromMessages = useMessageStore(state => state.unsubscribeFromMessages);
+  const sendMessage = useMessageStore(state => state.sendMessage);
+  const activeSubscription = useMessageStore(state => state.activeSubscription);
+
+  const [messageInput, setMessageInput] = useState('');
+  const [selectedSpriteId, setSelectedSpriteId] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   
   interface ChatroomResource {
     id: string;
@@ -170,14 +201,27 @@ export default function ChatroomPage() {
     characters: TurnCharacter[];
   }
 
+  interface BgmState {
+    playing: boolean;
+    time: number;
+    timestamp: string | null;
+  }
+
   interface ChatroomData {
     id: string;
     title: string;
     description: string | null;
     background_url?: string;
+    creator_id?: string;
+    creator_username?: string;
+    masters_ids?: string[];
+    chatters_ids?: string[];
+    chat_type?: string;
     roleplay_type?: string;
     resources?: ChatroomResource[];
     turns?: TurnGroup[];
+    bgm_url?: string;
+    bgm_state?: BgmState;
   }
 
   const [chatroomData, setChatroomData] = useState<ChatroomData | null>(null);
@@ -211,7 +255,7 @@ export default function ChatroomPage() {
   const [availableRoomCharacters, setAvailableRoomCharacters] = useState<{id: string, name: string}[]>([]);
   const [editableTurns, setEditableTurns] = useState<TurnGroup[]>([]);
 
-  const handleOpenManageTurns = () => {
+  const handleOpenManageTurns = useCallback(() => {
     if (chatroomData) {
       setEditableTurns(chatroomData.turns ? JSON.parse(JSON.stringify(chatroomData.turns)) : []);
     }
@@ -222,11 +266,11 @@ export default function ChatroomPage() {
     };
     fetchChars();
     setIsManageTurnsModalOpen(true);
-  };
+  }, [chatroomData, id]);
 
   const isMaster = myChatroomCharacters.some(c => c.name === 'TMC: Master');
 
-  const handleAddResource = async () => {
+  const handleAddResource = useCallback(async () => {
     if (!chatroomData || !newResourceTitle) return;
     setIsUploadingResource(true);
     
@@ -283,22 +327,22 @@ export default function ChatroomPage() {
       alert('Error guardando el recurso.');
     }
     setIsUploadingResource(false);
-  };
+  }, [chatroomData, newResourceTitle, newResourceType, newResourceContent, newResourceImageUrl, newResourceHp, newResourceMana, newResourceOffensive, newResourceDefensive, newResourcePhysical, newResourceLuck, newResourceCreator, newResourceBlaze, newResourceElement, newResourceItemType, newResourceStats, newResourceEffect]);
 
-  const handleSaveSprite = async () => {
+  const handleSaveSprite = useCallback(async () => {
     if (!activeChatroomCharacter?.vault_character_id || !newSpriteName || !newSpriteUrl) return;
     setIsUploadingSprite(true);
     
     let success = false;
     if (editingSpriteId) {
-      success = await useCharacterStore.getState().updateSprite(editingSpriteId, {
+      success = await updateSprite(editingSpriteId, {
         name: newSpriteName,
         image_url: newSpriteUrl,
         scale: newSpriteScale,
         position_y: newSpritePositionY
       });
     } else {
-      success = await useCharacterStore.getState().addSprite(
+      success = await addSprite(
         activeChatroomCharacter.vault_character_id, 
         newSpriteName, 
         newSpriteUrl,
@@ -328,51 +372,106 @@ export default function ChatroomPage() {
       alert("Error al guardar el sprite.");
     }
     setIsUploadingSprite(false);
-  };
+  }, [activeChatroomCharacter, newSpriteName, newSpriteUrl, editingSpriteId, updateSprite, addSprite, newSpriteScale, newSpritePositionY]);
 
-  const handleDeleteSprite = async (spriteId: string) => {
+  const handleDeleteSprite = useCallback(async (spriteId: string) => {
     if (confirm("¿Seguro que deseas eliminar este sprite?")) {
-       await useCharacterStore.getState().deleteSprite(spriteId);
+       await deleteSprite(spriteId);
        if (selectedSpriteId === spriteId) setSelectedSpriteId(null);
     }
-  };
+  }, [deleteSprite, selectedSpriteId]);
 
-  const openEditSprite = (sprite: CharacterSprite) => {
+  const openEditSprite = useCallback((sprite: CharacterSprite) => {
     setEditingSpriteId(sprite.id);
     setNewSpriteName(sprite.name);
     setNewSpriteUrl(sprite.image_url);
     setNewSpriteScale(sprite.scale ?? 1.0);
     setNewSpritePositionY(sprite.position_y ?? 0.0);
     setIsSpriteModalOpen(true);
-  };
+  }, []);
 
-  const openAddSprite = () => {
+  const openAddSprite = useCallback(() => {
     setEditingSpriteId(null);
     setNewSpriteName('');
     setNewSpriteUrl('');
     setNewSpriteScale(1.0);
     setNewSpritePositionY(0.0);
     setIsSpriteModalOpen(true);
-  };
+  }, []);
 
-  const handleOpenEditStatus = () => {
+  const handleOpenEditStatus = useCallback(() => {
     if (!activeChatroomCharacter) return;
     setEditHp(activeChatroomCharacter.hp);
     setEditMana(activeChatroomCharacter.mana);
+    setEditName(activeChatroomCharacter.name);
     setIsEditStatusModalOpen(true);
-  };
+  }, [activeChatroomCharacter]);
 
-  const handleSaveStatus = async () => {
+  const handleSaveStatus = useCallback(async () => {
     if (!activeChatroomCharacter) return;
+    
+    // Check if name changed
+    if (editName !== activeChatroomCharacter.name) {
+      const supabase = createClient();
+      await supabase.from('chatroom_characters').update({ name: editName }).eq('id', activeChatroomCharacter.id);
+    }
+
     const success = await updateCharacterStatus(activeChatroomCharacter.id, editHp, editMana);
     if (success) {
       setIsEditStatusModalOpen(false);
     } else {
       alert("Hubo un error al actualizar el estado.");
     }
-  };
+  }, [activeChatroomCharacter, editName, editHp, editMana, updateCharacterStatus]);
 
-  const handleSyncStats = async () => {
+  const handleAddMaster = useCallback(async () => {
+    if (!newMasterId || !chatroomData) return;
+    setIsAddingMaster(true);
+    const supabase = createClient();
+    
+    // Check if user exists
+    const { data: profile } = await supabase.from('profiles').select('id').eq('id', newMasterId).single();
+    if (!profile) {
+      alert('Usuario no encontrado. Asegúrate de que el ID es correcto.');
+      setIsAddingMaster(false);
+      return;
+    }
+
+    const currentMasters = chatroomData.masters_ids || [];
+    if (currentMasters.includes(newMasterId)) {
+      alert('El usuario ya es master de esta sala.');
+      setIsAddingMaster(false);
+      return;
+    }
+
+    const updatedMasters = [...currentMasters, newMasterId];
+    const { error } = await supabase
+      .from('chatrooms')
+      .update({ masters_ids: updatedMasters })
+      .eq('id', chatroomData.id);
+
+    if (!error) {
+      setNewMasterId('');
+    } else {
+      console.error('Error adding master:', error);
+    }
+    setIsAddingMaster(false);
+  }, [newMasterId, chatroomData]);
+
+  const handleRemoveMaster = useCallback(async (masterId: string) => {
+    if (!chatroomData) return;
+    const updatedMasters = (chatroomData.masters_ids || []).filter(id => id !== masterId);
+    const supabase = createClient();
+    await supabase.from('chatrooms').update({ masters_ids: updatedMasters }).eq('id', chatroomData.id);
+  }, [chatroomData]);
+
+  const handleUpdateChatType = useCallback(async (type: string) => {
+    if (!chatroomData) return;
+    const supabase = createClient();
+    await supabase.from('chatrooms').update({ chat_type: type }).eq('id', chatroomData.id);
+  }, [chatroomData]);
+
+  const handleSyncStats = useCallback(async () => {
     if (!activeChatroomCharacter?.vault_character_id) return;
     setIsSyncing(true);
     const success = await syncCharacterStats(activeChatroomCharacter.id, activeChatroomCharacter.vault_character_id);
@@ -388,32 +487,24 @@ export default function ChatroomPage() {
       alert("Error al intentar sincronizar estadísticas.");
     }
     setIsSyncing(false);
-  };
+  }, [activeChatroomCharacter, syncCharacterStats]);
 
-  const messages = useMessageStore(state => state.messages);
-  const fetchMessages = useMessageStore(state => state.fetchMessages);
-  const loadMoreMessages = useMessageStore(state => state.loadMoreMessages);
-  const hasMoreMessages = useMessageStore(state => state.hasMoreMessages);
-  const isLoadingMore = useMessageStore(state => state.isLoadingMore);
-  const subscribeToMessages = useMessageStore(state => state.subscribeToMessages);
-  const unsubscribeFromMessages = useMessageStore(state => state.unsubscribeFromMessages);
-  const sendMessage = useMessageStore(state => state.sendMessage);
-  const activeSubscription = useMessageStore(state => state.activeSubscription);
-
-  const [messageInput, setMessageInput] = useState('');
-  const [selectedSpriteId, setSelectedSpriteId] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Set default selected sprite when sprites load or character changes
   useEffect(() => {
     if (activeCharacterSprites.length > 0) {
-       // Only default to the first sprite if we haven't selected one, or if the selected one doesn't belong to this character
        const isValid = activeCharacterSprites.some(s => s.id === selectedSpriteId);
        if (!isValid) {
-         setSelectedSpriteId(activeCharacterSprites[0].id);
+         // Use a small delay or non-sync update to avoid cascading render lint
+         const nextId = activeCharacterSprites[0].id;
+         setTimeout(() => {
+           setSelectedSpriteId(nextId);
+         }, 0);
        }
-    } else {
-       setSelectedSpriteId(null);
+    } else if (selectedSpriteId !== null) {
+       setTimeout(() => {
+         setSelectedSpriteId(null);
+       }, 0);
     }
   }, [activeCharacterSprites, selectedSpriteId]);
 
@@ -425,16 +516,27 @@ export default function ChatroomPage() {
 
     // Fetch specific chatroom data safely inline
     const fetchChatroomData = async () => {
-      const { data } = await supabase.from('chatrooms').select('*').eq('id', id).maybeSingle();
+      const { data, error } = await supabase
+        .from('chatrooms')
+        .select('*, creator:profiles!chatrooms_creator_id_fkey(username, id)')
+        .eq('id', id)
+        .single();
       if (data && isMounted) {
         setChatroomData({
           id: data.id,
           title: data.title,
           description: data.description,
           background_url: data.background_url,
-          roleplay_type: data.roleplay_type,
+          creator_id: data.creator_id,
+          creator_username: data.creator?.username,
+          masters_ids: data.masters_ids || [],
+          chatters_ids: data.chatters_ids || [],
+          chat_type: data.chat_type || 'Recreativo',
+          roleplay_type: data.roleplay_type || 'free_roleplay',
+          bgm_url: data.bgm_url,
           resources: data.resources || [],
-          turns: data.turns || []
+          turns: data.turns || [],
+          bgm_state: data.bgm_state || { playing: false, time: 0, timestamp: null }
         });
       }
     };
@@ -463,15 +565,22 @@ export default function ChatroomPage() {
         },
         (payload) => {
           if (isMounted && payload.new) {
-            setChatroomData({
+            setChatroomData(prev => ({
+              ...prev,
               id: payload.new.id,
               title: payload.new.title,
               description: payload.new.description,
               background_url: payload.new.background_url,
-              roleplay_type: payload.new.roleplay_type,
+              creator_id: payload.new.creator_id,
+              masters_ids: payload.new.masters_ids || [],
+              chatters_ids: payload.new.chatters_ids || [],
+              chat_type: payload.new.chat_type || 'Recreativo',
+              roleplay_type: payload.new.roleplay_type || 'free_roleplay',
+              bgm_url: payload.new.bgm_url,
               resources: payload.new.resources || [],
-              turns: payload.new.turns || []
-            });
+              turns: payload.new.turns || [],
+              bgm_state: payload.new.bgm_state || { playing: false, time: 0, timestamp: null }
+            }));
           }
         }
       )
@@ -515,17 +624,32 @@ export default function ChatroomPage() {
   }, [id, user, subscribeToMessages, fetchMessages, checkJoinedStatus, fetchVaultCharacters, unsubscribeFromMessages]);
 
   // When successfully joined from the modal, we must sub and fetch
-  const handleJoin = async (char: any) => {
-    const success = await joinChatroom(id as string, user!.id, char);
+  const handleJoin = useCallback(async (char: any) => {
+    if (!id || !user) return;
+    const success = await joinChatroom(id as string, user.id, char);
     if (success) {
       setIsAddCharacterModalOpen(false);
+      
+      // Update chatters_ids in chatrooms table
+      const supabase = createClient();
+      
+      // We need to fetch current chatters_ids first to avoid overwriting or duplicates
+      const { data: roomData } = await supabase.from('chatrooms').select('chatters_ids').eq('id', id).single();
+      const existingChatters = roomData?.chatters_ids || [];
+      
+      if (!existingChatters.includes(user.id)) {
+        await supabase.from('chatrooms')
+          .update({ chatters_ids: [...existingChatters, user.id] })
+          .eq('id', id);
+      }
+
       // Fetch and sub only if we weren't already in the room
       if (myChatroomCharacters.length === 0) {
-        fetchMessages(id as string, user!.id);
-        subscribeToMessages(id as string, user!.id);
+        fetchMessages(id as string, user.id);
+        subscribeToMessages(id as string, user.id);
       }
     }
-  };
+  }, [id, user, joinChatroom, myChatroomCharacters.length, fetchMessages, subscribeToMessages]);
 
   useEffect(() => {
     if (isHistoryOpen && messagesEndRef.current) {
@@ -536,7 +660,24 @@ export default function ChatroomPage() {
     }
   }, [messages, isHistoryOpen]);
 
-  const handleLeaveRoom = async () => {
+  // Performance Optimization: Memoize VN Data
+  const vnData = useMemo(() => {
+    if (messages.length === 0) return null;
+    const lastMsg = messages[messages.length - 1];
+    const speakerName = lastMsg.chatroom_characters?.name || lastMsg.profiles?.username || 'Sistema';
+    const isSystem = lastMsg.is_system_message;
+
+    // Find the most recent non-system message before the current one from a DIFFERENT character
+    const prevMsg = [...messages].reverse().find(m => 
+      m.character_id && 
+      m.character_id !== lastMsg.character_id && 
+      !m.is_system_message
+    );
+
+    return { lastMsg, speakerName, isSystem, prevMsg };
+  }, [messages]);
+
+  const handleLeaveRoom = useCallback(async () => {
     if (!user || !id) return;
     if (confirm("¿Estás seguro de que deseas abandonar esta sala? Tus personajes registrados en esta instancia serán retirados.")) {
       const success = await leaveChatroom(id as string, user.id);
@@ -546,49 +687,90 @@ export default function ChatroomPage() {
         alert('Hubo un error al intentar abandonar la sala.');
       }
     }
-  };
+  }, [user, id, leaveChatroom, router]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSendMessage = useCallback(async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!messageInput.trim() || !activeChatroomCharacter || !user) return;
-    
-    // Safety check: ensure we actually send a valid sprite ID if one is available
-    if (activeChatroomCharacter) {
-      const isMaster = activeChatroomCharacter.name === 'TMC: Master';
-      
-      const success = await sendMessage({
-        chatroom_id: id as string,
-        sender_id: user.id,
-        character_id: isMaster ? null : activeChatroomCharacter.id, // Only use actual character IDs
-        sprite_id: selectedSpriteId || null,
-        content: messageInput,
-        is_system_message: isMaster && !selectedTargetUserId,
-        is_dm_whisper: isMaster && !!selectedTargetUserId,
-        target_user_id: isMaster ? selectedTargetUserId : null
-      });
 
-      if (success) {
-        setMessageInput('');
-      } else {
-        alert("Error al enviar el mensaje.");
+    const isMaster = activeChatroomCharacter.name === 'TMC: Master';
+
+    // Turn enforcement
+    if (!isMaster && (chatroomData?.roleplay_type === 'combat' || chatroomData?.roleplay_type === 'turn_based')) {
+      const turns = chatroomData.turns || [];
+      // Check if character is in any turn group
+      const relevantGroups = turns.filter(g => g.characters.some(c => c.character_id === activeChatroomCharacter.id));
+      
+      if (relevantGroups.length > 0) {
+        // If in turn groups, at least one must be active for this character
+        const isMyTurn = relevantGroups.some(g => g.active_character_id === activeChatroomCharacter.id);
+        if (!isMyTurn) {
+          alert("No es tu turno de actuar en este modo.");
+          return;
+        }
       }
     }
-  };
+    
+    const success = await sendMessage({
+      chatroom_id: id as string,
+      sender_id: user.id,
+      character_id: isMaster ? null : activeChatroomCharacter.id, // Only use actual character IDs
+      sprite_id: selectedSpriteId || null,
+      content: messageInput,
+      is_system_message: isMaster && !selectedTargetUserId,
+      is_dm_whisper: isMaster && !!selectedTargetUserId,
+      target_user_id: isMaster ? selectedTargetUserId : null
+    });
 
-  const handleDiceRoll = async () => {
+    if (success) {
+      setMessageInput('');
+      // Auto scroll handled by useEffect
+    }
+  }, [messageInput, activeChatroomCharacter, user, chatroomData, id, selectedSpriteId, selectedTargetUserId, sendMessage]);
+
+  const handleDiceRoll = useCallback(async () => {
     if (!activeChatroomCharacter || !user) return;
-    const roll = Math.floor(Math.random() * 20) + 1;
+    const roll = Math.floor(Math.random() * 100) + 1;
+    
     await sendMessage({
       chatroom_id: id as string,
       sender_id: user.id,
-      character_id: activeChatroomCharacter.id,
-      content: `Tirada de ${activeChatroomCharacter.name}`,
-      is_system_message: true,
-      dice_result: { roll, type: '1d20' }
+      character_id: activeChatroomCharacter.name === 'TMC: Master' ? null : activeChatroomCharacter.id,
+      sprite_id: selectedSpriteId || null,
+      content: `ha lanzado un dado de 100 y ha obtenido un ${roll}.`,
+      is_system_message: false,
+      dice_result: { roll, type: 'D100' }
     });
-  };
+  }, [activeChatroomCharacter, user, id, selectedSpriteId, sendMessage]);
 
-  const handleSaveTurns = async () => {
+  const fetchStaffProfiles = useCallback(async () => {
+    setIsFetchingStaff(true);
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, email, username, role')
+      .in('role', ['staff', 'superadmin']);
+    
+    if (!error && data) {
+      setStaffProfiles(data as Profile[]);
+      // Reset newMasterId selection to first available or empty
+      if (data.length > 0) {
+        setNewMasterId(data[0].id);
+      }
+    }
+    setIsFetchingStaff(false);
+  }, []);
+
+  useEffect(() => {
+    const triggerFetch = async () => {
+      if (isRoomDetailsOpen && profile?.id === chatroomData?.creator_id) {
+        await fetchStaffProfiles();
+      }
+    };
+    triggerFetch();
+  }, [isRoomDetailsOpen, profile?.id, chatroomData?.creator_id, fetchStaffProfiles]);
+
+  const handleSaveTurns = useCallback(async () => {
     if (!chatroomData) return;
     const supabase = createClient();
     const { error } = await supabase.from('chatrooms').update({ turns: editableTurns }).eq('id', chatroomData.id);
@@ -598,14 +780,106 @@ export default function ChatroomPage() {
     } else {
        alert("Error al guardar turnos.");
     }
-  };
+  }, [chatroomData, editableTurns]);
 
-  const handleAddTurnGroup = () => {
-    setEditableTurns([...editableTurns, { id: crypto.randomUUID(), name: `Grupo ${editableTurns.length + 1}`, active_character_id: null, characters: [] }]);
-  };
+  const handleToggleBGM = useCallback(async () => {
+    if (!chatroomData || !id || !user) return;
+    const currentState = chatroomData.bgm_state || { playing: false, time: 0, timestamp: null };
+    const newPlaying = !currentState.playing;
+    const supabase = createClient();
+    
+    // Catch current time from local ref if available
+    const currentTime = audioRef.current?.currentTime || currentState.time;
 
-  const handlePassTurn = async () => {
-    if (!activeChatroomCharacter || !chatroomData?.turns) return;
+    const newState = {
+      playing: newPlaying,
+      time: currentTime,
+      timestamp: new Date().toISOString()
+    };
+
+    const { error } = await supabase.from('chatrooms').update({ bgm_state: newState }).eq('id', id);
+    if (error) alert("Error al controlar música.");
+  }, [chatroomData, id, user]);
+
+  const handleRestartBGM = useCallback(async () => {
+     if (!chatroomData || !id || !user) return;
+     const supabase = createClient();
+     const newState = {
+       playing: true,
+       time: 0,
+       timestamp: new Date().toISOString()
+     };
+     const { error } = await supabase.from('chatrooms').update({ bgm_state: newState }).eq('id', id);
+     if(error) alert("Error al reiniciar música.");
+  }, [chatroomData, id, user]);
+
+  // BGM Sync Effect
+  useEffect(() => {
+    if (!audioRef.current || !chatroomData?.bgm_state) return;
+    const { playing, time, timestamp } = chatroomData.bgm_state;
+    
+    // Sync playing state
+    if (playing) {
+      audioRef.current.play().catch(() => {
+         // Autoplay might be blocked until user interaction
+      });
+    } else {
+      audioRef.current.pause();
+    }
+
+    // Playhead sync logic
+    let expectedTime = time;
+    if (playing && timestamp) {
+      const elapsed = (Date.now() - new Date(timestamp).getTime()) / 1000;
+      expectedTime += elapsed;
+    }
+
+    const drift = Math.abs(audioRef.current.currentTime - expectedTime);
+    if (drift > 2) {
+      audioRef.current.currentTime = expectedTime;
+    }
+  }, [chatroomData?.bgm_state]);
+
+  const handleUpdateRoleplayMode = useCallback(async (mode: string) => {
+    if (!id || !user) return;
+    const supabase = createClient();
+    const { error } = await supabase.from('chatrooms').update({ roleplay_type: mode }).eq('id', id);
+    if (error) {
+      alert("Error al actualizar el modo de rol.");
+    }
+  }, [id, user]);
+
+  const handleSyncBGM = useCallback(async () => {
+    if (!id || !user) return;
+    const supabase = createClient();
+    const newState = {
+      playing: true,
+      time: 0,
+      timestamp: new Date().toISOString()
+    };
+    const { error } = await supabase.from('chatrooms').update({ 
+      bgm_url: bgmInput,
+      bgm_state: newState
+    }).eq('id', id);
+    if (error) {
+      alert("Error al sincronizar música.");
+    } else {
+      setBgmInput('');
+    }
+  }, [id, user, bgmInput]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = volume;
+    }
+  }, [volume]);
+
+  const handleAddTurnGroup = useCallback(() => {
+    setEditableTurns(prev => [...prev, { id: crypto.randomUUID(), name: `Grupo ${prev.length + 1}`, active_character_id: null, characters: [] }]);
+  }, []);
+
+  const handlePassTurn = useCallback(async () => {
+    if (!activeChatroomCharacter || !chatroomData?.turns || !user || !id) return;
     
     let modified = false;
     const newTurns = JSON.parse(JSON.stringify(chatroomData.turns)) as TurnGroup[];
@@ -630,14 +904,14 @@ export default function ChatroomPage() {
           
           await sendMessage({
             chatroom_id: id as string,
-            sender_id: user?.id || '',
+            sender_id: user.id,
             character_id: activeChatroomCharacter.id,
             content: `${activeChatroomCharacter.name} ha cedido el turno.`,
             is_system_message: true
           });
        }
     }
-  };
+  }, [activeChatroomCharacter, chatroomData, user, id, sendMessage]);
 
   // Only block the entire page on initial auth & room checking.
   // Any character loading later on (like joining) shouldn't completely unmount the page.
@@ -672,8 +946,13 @@ export default function ChatroomPage() {
                 <button 
                   key={char.id}
                   onClick={() => handleJoin(char)}
-                  className="bg-[var(--surface-alt)] hover:bg-[var(--surface)] border border-[var(--border-light)] hover:border-[var(--glow)]/50 p-5 rounded-sm flex flex-col items-center gap-4 transition-all shadow-lg hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] group"
+                  className="bg-[var(--surface-alt)] hover:bg-[var(--surface)] border border-[var(--border-light)] hover:border-[var(--glow)]/50 p-5 rounded-sm flex flex-col items-center gap-4 transition-all shadow-lg hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] group relative"
                 >
+                  {char.is_npc && (
+                    <div className="absolute top-2 right-2 px-2 py-0.5 bg-[var(--accent)] text-white text-[8px] font-bold uppercase rounded-sm shadow-[0_0_8px_var(--glow)] z-10">
+                      NPC
+                    </div>
+                  )}
                   <div className="w-24 h-24 relative rounded-full overflow-hidden border-2 border-[var(--surface)] bg-[var(--border)] group-hover:border-[var(--glow)]/30 transition-colors flex items-center justify-center">
                      {char.image_url ? <Image src={char.image_url} alt={char.name} fill className="object-cover" /> : <User size={32} className="text-[var(--text-muted)] absolute inset-0 m-auto" />}
                   </div>
@@ -708,8 +987,13 @@ export default function ChatroomPage() {
                         <button 
                           key={char.id}
                           onClick={() => handleJoin(char)}
-                          className="bg-[var(--surface-alt)] hover:bg-[var(--surface)] border border-[var(--border-light)] hover:border-[var(--glow)]/50 p-4 rounded-sm flex flex-col items-center gap-3 transition-all group"
+                          className="bg-[var(--surface-alt)] hover:bg-[var(--surface)] border border-[var(--border-light)] hover:border-[var(--glow)]/50 p-4 rounded-sm flex flex-col items-center gap-3 transition-all group relative"
                         >
+                          {char.is_npc && (
+                            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-[var(--accent)] text-white text-[7px] font-bold uppercase rounded-sm z-10">
+                              NPC
+                            </div>
+                          )}
                           <div className="w-16 h-16 relative rounded-full overflow-hidden border-2 border-[var(--surface)] bg-[var(--border)] flex items-center justify-center">
                              {char.image_url ? <Image src={char.image_url} alt={char.name} fill className="object-cover" /> : <User size={24} className="text-[var(--text-muted)]" />}
                           </div>
@@ -1104,13 +1388,6 @@ export default function ChatroomPage() {
         </div>
       )}
 
-      {/* Background Image & Pattern */}
-
-      {chatroomData?.background_url && (
-          <div className="absolute inset-0 z-0 opacity-30 grayscale-[50%]">
-             <Image src={chatroomData.background_url} alt="Room Background" fill className="object-cover" />
-          </div>
-      )}
       <div className="absolute inset-0 pointer-events-none z-0 grid-overlay"></div>
       
       {/* Top Bar */}
@@ -1126,13 +1403,29 @@ export default function ChatroomPage() {
               <span className="text-[9px] font-mono text-[var(--glow)]">◆</span>
               <h1 className="text-xs font-bold tracking-[0.15em] text-[var(--text)] uppercase line-clamp-1">{chatroomData?.title || 'Cargando...'}</h1>
             </div>
-            <div className="mono-label mt-0.5 ml-4">ID: {typeof id === 'string' ? id.split('-')[0].toUpperCase() : ''}</div>
+            <div className="flex items-center gap-4 mt-0.5 ml-4">
+              <div className="mono-label">ID: {typeof id === 'string' ? id.split('-')[0].toUpperCase() : ''}</div>
+              <div className="h-2 w-px bg-[var(--border)] opacity-30"></div>
+              <div className="flex items-center gap-1.5" title="Participantes Totales">
+                <User size={10} className="text-[var(--text-muted)]" />
+                <span className="text-[9px] font-mono text-[var(--text-muted)]">
+                  {chatroomData?.masters_ids ? (chatroomData.masters_ids.length + (chatroomData.creator_id ? 1 : 0) + (chatroomData.chatters_ids ? chatroomData.chatters_ids.length : 0)) : chatters.length}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5" title="Staff Activo">
+                <RefreshCw size={10} className="text-[var(--accent)]" />
+                <span className="text-[9px] font-mono text-[var(--accent)]">
+                  {(chatroomData?.masters_ids?.length || 0) + 1}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
         <button 
           onClick={() => setIsRoomDetailsOpen(true)}
-          className="p-2 border border-transparent hover:border-[var(--border)] rounded-sm transition-colors text-[var(--text-muted)] hover:text-[var(--text)]"
+          className="p-2 border border-transparent hover:border-[var(--border)] bg-[var(--surface-alt)]/50 rounded-sm transition-colors text-[var(--text-muted)] hover:text-[var(--text)] flex items-center gap-2"
         >
+          <span className="text-[9px] font-bold uppercase tracking-widest hidden md:inline">Opciones</span>
           <MoreVertical size={16} />
         </button>
       </header>
@@ -1142,10 +1435,15 @@ export default function ChatroomPage() {
         
         {/* Center Area (Visual Novel & Background) */}
         <div className="flex-1 relative flex flex-col overflow-hidden">
-          {/* Background Gradient */}
-          <div className="absolute inset-0 z-0">
-            <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg)] via-transparent to-transparent"></div>
-          </div>
+           {/* Background Image & Gradient */}
+           <div className="absolute inset-0 z-0">
+             {chatroomData?.background_url && (
+               <div className="absolute inset-0 opacity-60">
+                 <Image src={chatroomData.background_url} alt="Room Background" fill className="object-cover" />
+               </div>
+             )}
+             <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg)] via-transparent to-transparent"></div>
+           </div>
 
           {/* Top Right: Mode Indicator */}
           <div className="absolute top-6 right-6 z-20 flex flex-col items-end gap-2">
@@ -1165,62 +1463,120 @@ export default function ChatroomPage() {
           </div>
 
 
-          {/* Visual Novel Area (Active Message) */}
-          <div className="absolute w-full bottom-0 px-6 pb-6 z-30 flex flex-col justify-end pointer-events-none">
-            {messages.length > 0 && (() => {
-               const lastMsg = messages[messages.length - 1];
-               const speakerName = lastMsg.chatroom_characters?.name || lastMsg.profiles?.username || 'Sistema';
-               const isSystem = lastMsg.is_system_message;
-               
-               return (
-                 <div className="relative w-full flex flex-col justify-end mt-auto">
-                  {/* Sprite - Positioned to the right */}
-                  {!isSystem && (
-                    <div className="absolute bottom-full right-[10%] w-[450px] h-[600px] pointer-events-auto transition-all animate-in fade-in slide-in-from-bottom-5 z-20 flex items-end justify-center">
-                      {lastMsg.character_sprites?.image_url ? (
-                        <div 
-                          className="w-full h-full relative"
-                          style={{ 
-                            transform: `scale(${lastMsg.character_sprites.scale ?? 1.0}) translateY(${(lastMsg.character_sprites.position_y ?? 0) * -1}px)`, 
-                            transformOrigin: 'bottom center' 
-                          }}
-                        >
-                          <Image 
-                            src={lastMsg.character_sprites.image_url} 
-                            alt={speakerName} 
-                            fill
-                            className="object-contain object-bottom drop-shadow-[0_0_20px_rgba(0,0,0,0.8)]" 
-                          />
+           {/* Visual Novel Area (Active Message) */}
+           <div className="absolute w-full bottom-0 px-6 pb-6 z-30 flex flex-col justify-end pointer-events-none">
+             {vnData && (() => {
+                const { lastMsg, speakerName, isSystem, prevMsg } = vnData;
+                
+                 return (
+                   <div className="relative w-full flex flex-col justify-end mt-auto">
+                     {/* Combined Sprite Area */}
+                     <div className="absolute bottom-0 w-full h-[600px] pointer-events-none flex items-end justify-center z-20 px-[10%] mb-10">
+                       
+                       {/* Previous Speaker Sprite - Dimmed and to the Left */}
+                       {prevMsg && prevMsg.character_sprites?.image_url && !isSystem && (
+                         <div 
+                           className="absolute bottom-0 left-[12%] w-[400px] h-[550px] transition-all duration-700 ease-in-out brightness-[0.35] contrast-[1.1] z-10"
+                           style={{ 
+                             transform: `scale(${prevMsg.character_sprites.scale ?? 0.9}) translateY(${(prevMsg.character_sprites.position_y ?? 0) * -1}px) translateX(-20px)`, 
+                             transformOrigin: 'bottom center' 
+                           }}
+                         >
+                           <Image 
+                             src={prevMsg.character_sprites.image_url} 
+                             alt="Previous Speaker" 
+                             fill
+                             className="object-contain object-bottom" 
+                           />
+                         </div>
+                       )}
+ 
+                       {/* Current Speaker Sprite - Bright and to the Right/Center */}
+                       {!isSystem && lastMsg.character_sprites?.image_url && (
+                         <div 
+                           className="absolute bottom-0 right-[12%] w-[450px] h-[600px] pointer-events-auto transition-all duration-500 z-20 animate-in fade-in slide-in-from-bottom-5"
+                           style={{ 
+                             transform: `scale(${lastMsg.character_sprites.scale ?? 1.0}) translateY(${(lastMsg.character_sprites.position_y ?? 0) * -1}px)`, 
+                             transformOrigin: 'bottom center' 
+                           }}
+                         >
+                           <Image 
+                             src={lastMsg.character_sprites.image_url} 
+                             alt={speakerName} 
+                             fill
+                             className="object-contain object-bottom drop-shadow-[0_0_30px_rgba(0,0,0,0.9)]" 
+                           />
+                         </div>
+                       )}
+ 
+                       {!isSystem && !lastMsg.character_sprites?.image_url && (
+                          <div className="absolute bottom-0 right-[20%] w-[450px] h-[600px] flex justify-center items-end pb-10">
+                             <User size={200} className="text-[var(--text-muted)] opacity-50 drop-shadow-[0_0_20px_rgba(0,0,0,0.8)]" />
+                          </div>
+                       )}
+                     </div>
+ 
+                     {/* Text Box - Full Width */}
+                     <div className="w-full bg-[#0a0a0a]/95 backdrop-blur-3xl p-8 shadow-[0_-10px_60px_rgba(0,0,0,0.8)] relative overflow-hidden pointer-events-auto z-30 mt-4 min-h-[180px] transition-all duration-500">
+                      {/* Cinematic Background Texture */}
+                      <div className="absolute inset-0 z-[-1] opacity-[0.03] pointer-events-none">
+                         <div className="w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] scale-150"></div>
+                      </div>
+                      
+                      {/* Subtle Gradient Shadow */}
+                      <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/20 to-transparent pointer-events-none"></div>
+                      
+                      <div className="flex flex-col gap-4 relative">
+                        {/* Speaker Name Label - Cinematic Style */}
+                        {!isSystem && (
+                          <div className="inline-block self-start mb-1">
+                            <h3 className="text-[var(--accent)] font-serif italic text-3xl font-extrabold tracking-[0.08em] drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] border-b-2 border-[var(--accent)]/30 pb-1">
+                              {speakerName}
+                            </h3>
+                          </div>
+                        )}
+
+                        {isSystem && (
+                          <div className="inline-block self-start mb-1">
+                            <h3 className="text-[var(--danger)] font-mono text-xl font-bold tracking-widest uppercase px-3 py-1 bg-[var(--danger)]/10 border border-[var(--danger)]/30">
+                              SISTEMA
+                            </h3>
+                          </div>
+                        )}
+                        
+                        {/* Message Content */}
+                        <div className="relative group">
+                          <p className="text-white/95 text-xl leading-relaxed font-sans font-medium drop-shadow-[1px_1px_2px_rgba(0,0,0,0.5)] max-w-[90%]">
+                             {isSystem ? lastMsg.content : `"${lastMsg.content}"`}
+                          </p>
+                          
+                          {chatroomData?.roleplay_type !== 'free_roleplay' && chatroomData?.turns?.some(g => g.active_character_id === lastMsg.character_id) && (
+                            <div className="absolute -right-4 top-0 flex items-center gap-2 px-3 py-1 bg-[var(--glow)]/10 border border-[var(--glow)]/30 rounded-full animate-pulse shadow-[0_0_15px_rgba(59,130,246,0.2)]">
+                              <div className="w-2 h-2 bg-[var(--glow)] rounded-full shadow-[0_0_10px_var(--glow)]"></div>
+                              <span className="text-[10px] font-bold text-[var(--glow)] tracking-[0.2em] uppercase">Activo</span>
+                            </div>
+                          )}
                         </div>
-                      ) : (
-                        <div className="w-full h-full flex justify-center items-end pb-10">
-                           <User size={200} className="text-[var(--text-muted)] opacity-50 drop-shadow-[0_0_20px_rgba(0,0,0,0.8)]" />
+                      </div>
+                      
+                      {lastMsg.dice_result && (
+                        <div className="mt-8 inline-flex items-center gap-3 bg-black/40 border border-[var(--glow)]/20 px-4 py-2 rounded-sm text-base font-mono shadow-2xl backdrop-blur-sm group hover:border-[var(--glow)]/50 transition-all">
+                          <Dices size={20} className="text-[var(--glow)] group-hover:rotate-12 transition-transform" />
+                          <span className="text-[var(--glow)] font-black text-xl tracking-tighter">{lastMsg.dice_result.roll}</span>
+                          <span className="text-white/40 text-xs uppercase tracking-widest">{lastMsg.dice_result.type}</span>
                         </div>
                       )}
-                    </div>
-                  )}
 
-                  {/* Text Box - Full Width */}
-                  <div className="w-full bg-[var(--surface)]/95 border border-[var(--border)] backdrop-blur-xl rounded-sm p-6 shadow-[0_10px_40px_rgba(0,0,0,0.8)] relative overflow-hidden pointer-events-auto z-30 mt-4 h-auto min-h-[120px]">
-                    {/* Accent Line */}
-                    <div className={`absolute top-0 left-0 w-48 h-1 ${isSystem ? 'bg-[var(--danger)]' : 'bg-[var(--accent)]'}`}></div>
-                    
-                    <h3 className={`${isSystem ? 'text-[var(--danger)]' : 'text-[var(--accent)]'} font-bold text-2xl mb-3 tracking-wide font-serif italic`}>
-                      {isSystem ? 'SISTEMA' : speakerName}
-                    </h3>
-                    <p className="text-[var(--text)] text-lg leading-relaxed font-mono whitespace-pre-wrap">{lastMsg.content}</p>
-                    
-                    {lastMsg.dice_result && (
-                      <div className="mt-5 inline-flex items-center gap-2 bg-[var(--surface-alt)] border border-[var(--border-light)] px-3 py-1.5 rounded-sm text-sm font-mono shadow-inner">
-                        <Dices size={16} className="text-[var(--glow)]" />
-                        <span className="text-[var(--glow)] font-bold">{lastMsg.dice_result.roll}</span>
-                        <span className="text-[var(--text-muted)]">{lastMsg.dice_result.type}</span>
+                      {/* Cinematic corner decorations */}
+                      <div className="absolute bottom-4 right-6 opacity-20 flex gap-2">
+                         <div className="w-1 h-1 bg-white rounded-full"></div>
+                         <div className="w-1 h-1 bg-white rounded-full"></div>
+                         <div className="w-12 h-[1px] bg-white self-center"></div>
                       </div>
-                    )}
+                    </div>
                   </div>
-                 </div>
-               );
-            })()}
+                )
+             })()}
           </div>
 
           {/* Drawers */}
@@ -1657,23 +2013,204 @@ export default function ChatroomPage() {
                 <X size={16} />
               </button>
             </div>
-            <div className="p-6 space-y-6">
+            <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
               <div>
-                <h3 className="mono-label mb-2">Nombre</h3>
-                <p className="text-sm text-[var(--text)] font-medium tracking-wide">{chatroomData?.title || 'Cargando...'}</p>
+                <h3 className="mono-label mb-2">Sala</h3>
+                <div className="flex items-center gap-3">
+                  <p className="text-sm text-[var(--text)] font-medium tracking-wide">{chatroomData?.title || 'Cargando...'}</p>
+                  <span className="text-[9px] px-2 py-0.5 bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/30 rounded-full font-bold uppercase tracking-widest">
+                    {chatroomData?.chat_type || 'Recreativo'}
+                  </span>
+                </div>
               </div>
+              
               <div>
                 <h3 className="mono-label mb-2">Descripción</h3>
                 <p className="text-xs text-[var(--text-muted)] leading-relaxed font-mono">
                   {chatroomData?.description || 'Sin descripción.'}
                 </p>
               </div>
-              <div>
-                <h3 className="mono-label mb-3">Participantes ({chatters.length})</h3>
-                <div className="flex flex-wrap gap-2 text-xs text-[var(--text-muted)] font-mono">
-                  {chatters.map(c => c.username).join(', ')}
+
+              <div className="flex gap-6 border-t border-[var(--border-light)]/30 pt-4">
+                <div>
+                  <h4 className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tighter mb-1">Creador</h4>
+                  <p className="text-xs font-mono">{chatroomData?.creator_username || 'Desconocido'}</p>
+                </div>
+                <div>
+                  <h4 className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tighter mb-1">Participantes</h4>
+                  <p className="text-xs font-mono">{chatroomData?.masters_ids ? (chatroomData.masters_ids.length + (chatroomData.creator_id ? 1 : 0) + (chatroomData.chatters_ids ? chatroomData.chatters_ids.length : 0)) : chatters.length}</p>
+                </div>
+                <div>
+                  <h4 className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tighter mb-1">Masters</h4>
+                  <p className="text-xs font-mono">{(chatroomData?.masters_ids?.length || 0) + 1}</p>
                 </div>
               </div>
+
+              {/* Staff Management Section - Only for Creator */}
+              {profile?.id === chatroomData?.creator_id && (
+                <div className="pt-4 border-t border-[var(--border-light)]/30 space-y-4">
+                  <h3 className="text-[10px] font-bold text-[var(--accent)] uppercase tracking-widest">Gestión de Staff</h3>
+                  
+                  <div className="space-y-2">
+                    <label className="text-[9px] text-[var(--text-muted)] uppercase font-mono">Modo de Rol</label>
+                    <div className="flex gap-2">
+                      {[
+                        { id: 'free_roleplay', label: 'Libre' },
+                        { id: 'combat', label: 'Combate' },
+                        { id: 'turn_based', label: 'Turnos' }
+                      ].map(mode => (
+                        <button
+                          key={mode.id}
+                          onClick={() => handleUpdateRoleplayMode(mode.id)}
+                          className={`flex-1 py-1.5 text-[9px] font-bold uppercase rounded-sm border transition-all ${chatroomData?.roleplay_type === mode.id ? 'bg-[var(--accent)] border-[var(--glow)] text-white shadow-[0_0_10px_var(--glow)]' : 'bg-[var(--surface-alt)] border-[var(--border-light)] text-[var(--text-muted)] hover:border-[var(--glow)]/30'}`}
+                        >
+                          {mode.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="text-[9px] text-[var(--text-muted)] uppercase font-mono">Control de Música (BGM)</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text"
+                        value={bgmInput}
+                        onChange={(e) => setBgmInput(e.target.value)}
+                        placeholder="Link directo .mp3"
+                        className="flex-1 bg-[var(--surface-alt)] border border-[var(--border-light)] text-[10px] font-mono rounded-sm px-3 py-2 outline-none focus:border-[var(--glow)]/50"
+                      />
+                      <button 
+                        onClick={handleSyncBGM}
+                        className="bg-[var(--glow)]/10 hover:bg-[var(--glow)]/20 text-[var(--glow)] border border-[var(--glow)]/30 px-3 py-1 rounded-sm text-[9px] font-bold uppercase tracking-widest transition-all"
+                      >
+                        Set
+                      </button>
+                    </div>
+                    {chatroomData?.bgm_url && (
+                      <div className="flex flex-col gap-2 bg-[var(--surface-alt)]/50 p-3 rounded-sm border border-[var(--border-light)]">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[8px] font-mono text-[var(--text-muted)] truncate uppercase tracking-tighter max-w-[150px]">Link: {chatroomData.bgm_url}</p>
+                          <button onClick={() => { setBgmInput(''); handleSyncBGM(); }} className="text-[var(--danger)] hover:text-red-500">
+                            <Trash2 size={10} />
+                          </button>
+                        </div>
+                        <div className="flex gap-2">
+                           <button 
+                             onClick={handleToggleBGM}
+                             className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded-sm border transition-all text-[9px] font-bold uppercase ${chatroomData?.bgm_state?.playing ? 'bg-[var(--danger)]/10 border-[var(--danger)]/30 text-[var(--danger)]' : 'bg-[var(--glow)]/10 border-[var(--glow)]/30 text-[var(--glow)]'}`}
+                           >
+                             {chatroomData?.bgm_state?.playing ? <Pause size={12} /> : <Play size={12} />}
+                             {chatroomData?.bgm_state?.playing ? 'Pausar' : 'Reproducir'}
+                           </button>
+                           <button 
+                             onClick={handleRestartBGM}
+                             className="flex items-center justify-center gap-2 px-3 py-1.5 bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--text)] rounded-sm text-[9px] font-bold uppercase transition-all"
+                           >
+                             <RotateCcw size={12} />
+                             Reiniciar
+                           </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                       <label className="text-[9px] text-[var(--text-muted)] uppercase font-mono">Volumen Local</label>
+                       <span className="text-[10px] font-mono text-[var(--glow)]">{(volume * 100).toFixed(0)}%</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="1" 
+                      step="0.01" 
+                      value={volume} 
+                      onChange={(e) => setVolume(parseFloat(e.target.value))} 
+                      className="w-full h-1 bg-[var(--border-light)] rounded-full appearance-none cursor-pointer accent-[var(--glow)]" 
+                    />
+                  </div>
+
+                   <div className="pt-4 border-t border-[var(--border-light)]/30 space-y-3">
+                     <label className="text-[9px] text-[var(--text-muted)] uppercase font-mono">Imagen de Fondo (Background)</label>
+                     <ImageUploader 
+                       value={chatroomData?.background_url || ''} 
+                       onChange={async (url) => {
+                         const supabase = createClient();
+                         const { error } = await supabase.from('chatrooms').update({ background_url: url }).eq('id', id);
+                         if (!error) {
+                           setChatroomData(prev => prev ? { ...prev, background_url: url } : null);
+                         }
+                       }}
+                       label="Fondo de la Sala"
+                       bucket="chatroom_images"
+                     />
+                   </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[9px] text-[var(--text-muted)] uppercase font-mono">Tipo de Sala</label>
+                    <div className="flex flex-wrap gap-2">
+                      {['Recreativo', 'Off-rol', 'Eventos', 'Misiones'].map(type => (
+                        <button
+                          key={type}
+                          onClick={() => handleUpdateChatType(type)}
+                          className={`px-3 py-1 text-[9px] font-bold uppercase rounded-sm border transition-all ${chatroomData?.chat_type === type ? 'bg-[var(--accent)] border-[var(--glow)] text-white' : 'bg-[var(--surface-alt)] border-[var(--border-light)] text-[var(--text-muted)] hover:border-[var(--accent)]/50'}`}
+                        >
+                          {type}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="text-[9px] text-[var(--text-muted)] uppercase font-mono">Añadir Master (Staff)</label>
+                    <div className="flex gap-2">
+                      <select 
+                        value={newMasterId}
+                        onChange={(e) => setNewMasterId(e.target.value)}
+                        className="flex-1 bg-[var(--surface-alt)] border border-[var(--border-light)] text-xs font-mono rounded-sm px-3 py-2 outline-none focus:border-[var(--accent)]"
+                      >
+                        <option value="" disabled>{isFetchingStaff ? 'Cargando Staff...' : 'Seleccionar Staff...'}</option>
+                        {staffProfiles
+                          .filter(p => !chatroomData?.masters_ids?.includes(p.id))
+                          .map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.username} ({maskEmail(p.email)})
+                          </option>
+                        ))}
+                      </select>
+                      <button 
+                        onClick={handleAddMaster}
+                        disabled={isAddingMaster || !newMasterId}
+                        className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white px-3 py-2 rounded-sm disabled:opacity-50 transition-colors"
+                      >
+                        {isAddingMaster ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {chatroomData?.masters_ids && chatroomData.masters_ids.length > 0 && (
+                     <div className="space-y-2">
+                       <label className="text-[9px] text-[var(--text-muted)] uppercase font-mono">Masters Actuales</label>
+                       <div className="space-y-1">
+                         {chatroomData.masters_ids.map(mid => (
+                           <div key={mid} className="flex items-center justify-between bg-[var(--surface-alt)] p-2 rounded-sm border border-[var(--border-light)]">
+                              <span className="text-[10px] font-bold text-[var(--accent)] truncate max-w-[200px]">
+                                {staffProfiles.find(p => p.id === mid)?.username || 'Cargando...'}
+                              </span>
+                             <button 
+                               onClick={() => handleRemoveMaster(mid)}
+                               className="text-[var(--danger)] hover:text-red-500 p-1"
+                             >
+                               <Trash2 size={12} />
+                             </button>
+                           </div>
+                         ))}
+                       </div>
+                     </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="p-5 border-t border-[var(--border)] bg-[var(--surface-alt)] flex justify-end">
               <button 
@@ -1698,6 +2235,16 @@ export default function ChatroomPage() {
               </button>
             </div>
             <div className="p-6 space-y-6">
+               <div className="flex flex-col gap-2">
+                 <label className="text-[10px] font-bold tracking-widest text-[var(--accent)] uppercase">Nombre del Personaje</label>
+                 <input 
+                   type="text" 
+                   value={editName}
+                   onChange={(e) => setEditName(e.target.value)}
+                   className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-mono text-sm rounded-sm p-3 outline-none focus:border-[var(--accent)] transition-colors"
+                 />
+               </div>
+
                <div className="flex flex-col gap-2">
                  <label className="text-[10px] font-bold tracking-widest text-[var(--danger)] uppercase">Health Points (HP)</label>
                  <div className="flex items-center gap-3">
@@ -1757,6 +2304,16 @@ export default function ChatroomPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* BGM Player */}
+      {chatroomData?.bgm_url && (
+        <audio 
+          ref={audioRef}
+          src={chatroomData.bgm_url} 
+          autoPlay 
+          loop 
+        />
       )}
     </div>
   );

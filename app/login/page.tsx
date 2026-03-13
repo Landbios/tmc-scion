@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { maskEmail } from '@/lib/utils';
 import { Shield, LogIn, UserPlus, ChevronRight } from 'lucide-react';
 import { Suspense } from 'react';
 
@@ -163,7 +164,7 @@ function LoginForm() {
                 ◈ TRANSMISIÓN ENVIADA
               </div>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.7 }}>
-                Revisa <strong style={{ color: 'var(--text)' }}>{email}</strong> para un enlace de confirmación y completar tu registro.
+                Revisa <strong style={{ color: 'var(--text)' }}>{maskEmail(email)}</strong> para un enlace de confirmación y completar tu registro.
               </p>
               <button
                 style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--glow)', marginTop: '1rem', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.1em' }}
