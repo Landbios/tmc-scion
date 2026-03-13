@@ -138,14 +138,24 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       const chars = data as ChatroomCharacter[];
       if (masterChar) chars.unshift(masterChar);
 
-      const firstChar = chars[0];
+      // Fix: Preserve current active character if it still exists in the new list
+      const currentActive = get().activeChatroomCharacter;
+      const stillInRoom = currentActive ? chars.find(c => c.id === currentActive.id) : null;
+      
+      const activeToSet = stillInRoom || chars[0];
+
       // Fetch sprites if found
-      if (firstChar.vault_character_id) {
-        get().fetchCharacterSprites(firstChar.vault_character_id);
+      if (activeToSet.vault_character_id) {
+        get().fetchCharacterSprites(activeToSet.vault_character_id);
       } else {
         set({ activeCharacterSprites: [] }); // Reset sprites if it's the master
       }
-      set({ myChatroomCharacters: chars, activeChatroomCharacter: firstChar, isLoading: false });
+
+      set({ 
+        myChatroomCharacters: chars, 
+        activeChatroomCharacter: activeToSet, 
+        isLoading: false 
+      });
       return true;
     } else if (masterChar) {
       // User is a master but has no regular characters joined. Let them use the Master!

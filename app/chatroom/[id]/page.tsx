@@ -149,6 +149,11 @@ export default function ChatroomPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isUploadingSprite, setIsUploadingSprite] = useState(false);
   
+  // Multi-Dice State
+  const [isDiceModalOpen, setIsDiceModalOpen] = useState(false);
+  const [diceAmount, setDiceAmount] = useState(1);
+  const [diceSides, setDiceSides] = useState(100);
+  
   const messages = useMessageStore(state => state.messages);
   const fetchMessages = useMessageStore(state => state.fetchMessages);
   const loadMoreMessages = useMessageStore(state => state.loadMoreMessages);
@@ -603,9 +608,12 @@ export default function ChatroomPage() {
       }
       
       subscribeToMessages(id as string, user.id);
-      fetchMessages(id as string, user.id);
-
+      fetchMessages(id as string, user.id); // Always fetch messages on init
+      
+      // Check if user has joined the room with any character
       const hasJoined = await checkJoinedStatus(id as string, user.id);
+      
+      // If not joined, or if the active character is no longer valid, prompt to join/select
       if (!hasJoined && isMounted) {
         // Use getState to check if we already have vault characters to avoid unnecessary fetches
         if (useCharacterStore.getState().vaultCharacters.length === 0) {
@@ -689,6 +697,33 @@ export default function ChatroomPage() {
     }
   }, [user, id, leaveChatroom, router]);
 
+  const handlePassTurn = useCallback(async () => {
+    if (!activeChatroomCharacter || !chatroomData?.turns || !user || !id) return;
+    
+    let modified = false;
+    const newTurns = JSON.parse(JSON.stringify(chatroomData.turns)) as TurnGroup[];
+    
+    for (const group of newTurns) {
+       if (group.active_character_id === activeChatroomCharacter.id) {
+          const chars = group.characters;
+          const myIndex = chars.findIndex(c => c.character_id === activeChatroomCharacter.id);
+          if (myIndex !== -1) {
+             const nextIndex = (myIndex + 1) % chars.length;
+             group.active_character_id = chars[nextIndex].character_id;
+             modified = true;
+          }
+       }
+    }
+
+    if (modified) {
+       const supabase = createClient();
+       const { error } = await supabase.from('chatrooms').update({ turns: newTurns }).eq('id', chatroomData.id);
+       if (!error) {
+          setChatroomData({ ...chatroomData, turns: newTurns });
+       }
+    }
+  }, [activeChatroomCharacter, chatroomData, user, id, sendMessage]);
+
   const handleSendMessage = useCallback(async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!messageInput.trim() || !activeChatroomCharacter || !user) return;
@@ -724,23 +759,41 @@ export default function ChatroomPage() {
 
     if (success) {
       setMessageInput('');
-      // Auto scroll handled by useEffect
+      
+      // Auto-pass turn if in turn-based mode and it's our turn
+      if (!isMaster && (chatroomData?.roleplay_type === 'combat' || chatroomData?.roleplay_type === 'turn_based')) {
+        const turns = chatroomData.turns || [];
+        const isMyTurn = turns.some(g => g.active_character_id === activeChatroomCharacter.id);
+        if (isMyTurn) {
+          handlePassTurn();
+        }
+      }
     }
-  }, [messageInput, activeChatroomCharacter, user, chatroomData, id, selectedSpriteId, selectedTargetUserId, sendMessage]);
+  }, [messageInput, activeChatroomCharacter, user, chatroomData, id, selectedSpriteId, selectedTargetUserId, sendMessage, handlePassTurn]);
 
-  const handleDiceRoll = useCallback(async () => {
+  const handleDiceRoll = useCallback(async (amount: number = 1, sides: number = 100) => {
     if (!activeChatroomCharacter || !user) return;
-    const roll = Math.floor(Math.random() * 100) + 1;
+    
+    const rolls: number[] = [];
+    for (let i = 0; i < amount; i++) {
+      rolls.push(Math.floor(Math.random() * sides) + 1);
+    }
+    
+    const total = rolls.reduce((a, b) => a + b, 0);
+    const resultsStr = rolls.length > 1 ? `${rolls.join(', ')} [Total: ${total}]` : `${total}`;
+    const diceStr = `${amount}d${sides}`;
     
     await sendMessage({
       chatroom_id: id as string,
       sender_id: user.id,
       character_id: activeChatroomCharacter.name === 'TMC: Master' ? null : activeChatroomCharacter.id,
       sprite_id: selectedSpriteId || null,
-      content: `ha lanzado un dado de 100 y ha obtenido un ${roll}.`,
+      content: `ha lanzado ${diceStr} y ha obtenido: ${resultsStr}.`,
       is_system_message: false,
-      dice_result: { roll, type: 'D100' }
+      dice_result: { roll: total, type: diceStr.toUpperCase() }
     });
+    
+    setIsDiceModalOpen(false);
   }, [activeChatroomCharacter, user, id, selectedSpriteId, sendMessage]);
 
   const fetchStaffProfiles = useCallback(async () => {
@@ -878,40 +931,6 @@ export default function ChatroomPage() {
     setEditableTurns(prev => [...prev, { id: crypto.randomUUID(), name: `Grupo ${prev.length + 1}`, active_character_id: null, characters: [] }]);
   }, []);
 
-  const handlePassTurn = useCallback(async () => {
-    if (!activeChatroomCharacter || !chatroomData?.turns || !user || !id) return;
-    
-    let modified = false;
-    const newTurns = JSON.parse(JSON.stringify(chatroomData.turns)) as TurnGroup[];
-    
-    for (const group of newTurns) {
-       if (group.active_character_id === activeChatroomCharacter.id) {
-          const chars = group.characters;
-          const myIndex = chars.findIndex(c => c.character_id === activeChatroomCharacter.id);
-          if (myIndex !== -1) {
-             const nextIndex = (myIndex + 1) % chars.length;
-             group.active_character_id = chars[nextIndex].character_id;
-             modified = true;
-          }
-       }
-    }
-
-    if (modified) {
-       const supabase = createClient();
-       const { error } = await supabase.from('chatrooms').update({ turns: newTurns }).eq('id', chatroomData.id);
-       if (!error) {
-          setChatroomData({ ...chatroomData, turns: newTurns });
-          
-          await sendMessage({
-            chatroom_id: id as string,
-            sender_id: user.id,
-            character_id: activeChatroomCharacter.id,
-            content: `${activeChatroomCharacter.name} ha cedido el turno.`,
-            is_system_message: true
-          });
-       }
-    }
-  }, [activeChatroomCharacter, chatroomData, user, id, sendMessage]);
 
   // Only block the entire page on initial auth & room checking.
   // Any character loading later on (like joining) shouldn't completely unmount the page.
@@ -1285,6 +1304,20 @@ export default function ChatroomPage() {
                         >
                           <Trash2 size={16} />
                         </button>
+                        <button 
+                          onClick={() => {
+                            const newTurns = [...editableTurns];
+                            newTurns[groupIndex].characters = newTurns[groupIndex].characters.map(c => ({
+                              ...c,
+                              initiative: Math.floor(Math.random() * 20) + 1
+                            }));
+                            newTurns[groupIndex].characters.sort((a,b) => b.initiative - a.initiative);
+                            setEditableTurns(newTurns);
+                          }}
+                          className="mt-6 px-3 py-1.5 bg-[var(--glow)]/10 border border-[var(--glow)]/30 text-[var(--glow)] hover:bg-[var(--glow)] hover:text-white rounded-sm text-[10px] font-bold uppercase tracking-widest transition-all flex items-center gap-2"
+                        >
+                          <RotateCcw size={12} /> Tirar Todo
+                        </button>
                       </div>
 
                       <div className="border border-[var(--border-light)] rounded-sm bg-[var(--surface-alt)]">
@@ -1298,8 +1331,14 @@ export default function ChatroomPage() {
                                 if(char) {
                                   const newTurns = [...editableTurns];
                                   if (!newTurns[groupIndex].characters.some(c => c.character_id === char.id)) {
-                                     newTurns[groupIndex].characters.push({ character_id: char.id, name: char.name, initiative: 0 });
-                                     // Sort simply
+                                     // Auto-roll initiative d20
+                                     const roll = Math.floor(Math.random() * 20) + 1;
+                                     newTurns[groupIndex].characters.push({ 
+                                       character_id: char.id, 
+                                       name: char.name, 
+                                       initiative: roll 
+                                     });
+                                     // Sort by initiative descending
                                      newTurns[groupIndex].characters.sort((a,b) => b.initiative - a.initiative);
                                   }
                                   setEditableTurns(newTurns);
@@ -1992,7 +2031,7 @@ export default function ChatroomPage() {
 
         {/* Actions */}
         <div className="flex flex-col gap-3 min-w-[160px] h-full py-4 justify-end">
-          <button onClick={handleDiceRoll} className="flex items-center justify-center gap-2 bg-transparent hover:bg-[var(--accent)]/10 border border-[var(--accent)]/50 text-[var(--accent)] px-4 py-2.5 rounded-sm text-[10px] font-bold uppercase tracking-widest transition-all shadow-[0_0_10px_rgba(59,130,246,0.05)] hover:shadow-[0_0_15px_rgba(59,130,246,0.15)]">
+          <button onClick={() => setIsDiceModalOpen(true)} className="flex items-center justify-center gap-2 bg-transparent hover:bg-[var(--accent)]/10 border border-[var(--accent)]/50 text-[var(--accent)] px-4 py-2.5 rounded-sm text-[10px] font-bold uppercase tracking-widest transition-all shadow-[0_0_10px_rgba(59,130,246,0.05)] hover:shadow-[0_0_15px_rgba(59,130,246,0.15)]">
             <Dices size={14} />
             Tirar Dado
           </button>
@@ -2314,6 +2353,59 @@ export default function ChatroomPage() {
           autoPlay 
           loop 
         />
+      )}
+
+      {/* Dice Roll Modal */}
+      {isDiceModalOpen && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-xs bg-[var(--surface)] border border-[var(--border)] rounded-sm shadow-2xl flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-[var(--border)] flex justify-between items-center bg-[var(--surface-alt)]">
+              <h2 className="text-[10px] font-bold text-[var(--text)] tracking-widest uppercase">Lanzar Dados</h2>
+              <button onClick={() => setIsDiceModalOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text)]">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="space-y-2">
+                <label className="text-[9px] text-[var(--text-muted)] uppercase font-mono">Cantidad</label>
+                <div className="flex bg-[var(--surface-alt)] border border-[var(--border-light)] rounded-sm overflow-hidden">
+                   <button 
+                    onClick={() => setDiceAmount(Math.max(1, diceAmount - 1))}
+                    className="flex-1 py-2 hover:bg-[var(--border)] text-[var(--text)] text-sm font-bold"
+                   >-</button>
+                   <div className="flex-[2] py-2 text-center text-sm font-bold text-[var(--glow)] border-x border-[var(--border-light)]">{diceAmount}</div>
+                   <button 
+                    onClick={() => setDiceAmount(Math.min(20, diceAmount + 1))}
+                    className="flex-1 py-2 hover:bg-[var(--border)] text-[var(--text)] text-sm font-bold"
+                   >+</button>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-[9px] text-[var(--text-muted)] uppercase font-mono">Tipo de Dado</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[4, 6, 8, 10, 12, 20, 100].map(sides => (
+                    <button
+                      key={sides}
+                      onClick={() => setDiceSides(sides)}
+                      className={`py-2 text-[10px] border rounded-sm transition-all font-bold ${diceSides === sides ? 'bg-[var(--accent)] border-[var(--glow)] text-white shadow-[0_0_8px_var(--glow)]' : 'bg-[var(--surface-alt)] border-[var(--border-light)] text-[var(--text-muted)] hover:border-[var(--glow)]/30'}`}
+                    >
+                      D{sides}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="p-4 border-t border-[var(--border)] bg-[var(--surface-alt)]">
+              <button 
+                onClick={() => handleDiceRoll(diceAmount, diceSides)}
+                className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-sm text-[10px] font-bold uppercase tracking-widest transition-all shadow-[0_0_10px_var(--glow)]"
+              >
+                Lanzar {diceAmount}d{diceSides}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
