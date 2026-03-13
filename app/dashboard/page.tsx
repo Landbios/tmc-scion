@@ -33,6 +33,9 @@ export default function Dashboard() {
   const [newRoomImage, setNewRoomImage] = useState('');
   const [newRoomBg, setNewRoomBg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeTab, setActiveTab] = useState('Explorar');
+  const [newRoomType, setNewRoomType] = useState('Recreativo');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     fetchChatrooms();
@@ -50,6 +53,7 @@ export default function Dashboard() {
       portrait_url: newRoomImage,
       background_url: newRoomBg,
       roleplay_type: 'free_roleplay',
+      chat_type: newRoomType,
       chatters_ids: [],
       masters_ids: [user.id], 
       resources: [],
@@ -71,6 +75,7 @@ export default function Dashboard() {
     setNewRoomDesc(room.description || '');
     setNewRoomImage(room.portrait_url || '');
     setNewRoomBg(room.background_url || '');
+    setNewRoomType(room.chat_type || 'Recreativo');
     setEditingRoomId(room.id);
     setIsEditModalOpen(true);
   };
@@ -85,6 +90,7 @@ export default function Dashboard() {
       description: newRoomDesc,
       portrait_url: newRoomImage,
       background_url: newRoomBg,
+      chat_type: newRoomType
     });
     
     setIsSubmitting(false);
@@ -140,27 +146,47 @@ export default function Dashboard() {
             <h1 className="text-3xl font-bold font-serif italic tracking-wide text-[var(--text)]">Salas de Operaciones</h1>
           </div>
           
-          <div className="flex items-center gap-4">
-            {/* Search */}
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-              <input 
-                type="text" 
-                placeholder="Buscar sala..." 
-                className="bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] text-[11px] uppercase tracking-wider font-bold rounded-sm pl-9 pr-4 py-2.5 outline-none focus:border-[var(--glow)]/50 focus:ring-1 focus:ring-[var(--glow)]/50 transition-all min-w-[200px]"
-              />
+          <div className="flex flex-col gap-6 w-full sm:w-auto">
+            {/* Tabs */}
+            <div className="flex items-center bg-[var(--surface-alt)] border border-[var(--border-light)] p-1 rounded-sm self-start">
+               {['Explorar', 'Recreativo', 'Off-rol', 'Evento', 'Misiones'].map(tab => (
+                 <button
+                   key={tab}
+                   onClick={() => setActiveTab(tab)}
+                   className={`px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-all rounded-sm ${activeTab === tab ? 'bg-[var(--accent)] text-white shadow-[0_0_8px_rgba(59,130,246,0.3)]' : 'text-[var(--text-muted)] hover:text-[var(--text)]'}`}
+                 >
+                   {tab}
+                 </button>
+               ))}
             </div>
-            
-            {/* Only Staff/Superadmins can create */}
-            {profile?.role && ['staff', 'superadmin'].includes(profile.role) && (
-              <button 
-                onClick={() => setIsCreateModalOpen(true)}
-                className="flex items-center gap-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white px-5 py-2.5 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)]"
-              >
-                <Plus size={14} />
-                Crear Sala
-              </button>
-            )}
+
+            <div className="flex items-center gap-4">
+              {/* Search */}
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                <input 
+                  type="text" 
+                  placeholder="Buscar sala..." 
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] text-[11px] uppercase tracking-wider font-bold rounded-sm pl-9 pr-4 py-2.5 outline-none focus:border-[var(--glow)]/50 focus:ring-1 focus:ring-[var(--glow)]/50 transition-all min-w-[200px]"
+                />
+              </div>
+              
+              {/* Only Staff/Superadmins can create */}
+              {profile?.role && ['staff', 'superadmin'].includes(profile.role) && (
+                <button 
+                  onClick={() => {
+                    setNewRoomType('Recreativo');
+                    setIsCreateModalOpen(true);
+                  }}
+                  className="flex items-center gap-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white px-5 py-2.5 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)]"
+                >
+                  <Plus size={14} />
+                  Crear Sala
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -169,14 +195,29 @@ export default function Dashboard() {
           <div className="flex justify-center py-20">
             <div className="text-[var(--glow)] animate-pulse font-mono uppercase tracking-widest text-sm text-glow">Cargando datos...</div>
           </div>
-        ) : chatrooms.length === 0 ? (
-          <div className="text-center py-20 border border-dashed border-[var(--border-light)] rounded-sm bg-[var(--surface-alt)]/50">
-            <p className="text-[var(--text-muted)] font-mono text-sm">No se encontraron salas de operaciones activas.</p>
-          </div>
         ) : (
           <div className="flex flex-col gap-6 w-full max-w-5xl">
-            {chatrooms.map((room) => (
-              <Link key={room.id} href={`/chatroom/${room.id}`} className="block group w-full">
+            {chatrooms
+              .filter(room => {
+                const matchesTab = activeTab === 'Explorar' || room.chat_type === activeTab;
+                const matchesSearch = room.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                                     (room.description?.toLowerCase() || '').includes(searchQuery.toLowerCase());
+                return matchesTab && matchesSearch;
+              })
+              .length === 0 ? (
+                <div className="text-center py-20 border border-dashed border-[var(--border-light)] rounded-sm bg-[var(--surface-alt)]/50">
+                  <p className="text-[var(--text-muted)] font-mono text-sm">No se encontraron salas en esta categoría.</p>
+                </div>
+              ) : (
+                chatrooms
+                  .filter(room => {
+                    const matchesTab = activeTab === 'Explorar' || room.chat_type === activeTab;
+                    const matchesSearch = room.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                                         (room.description?.toLowerCase() || '').includes(searchQuery.toLowerCase());
+                    return matchesTab && matchesSearch;
+                  })
+                  .map((room) => (
+                    <Link key={room.id} href={`/chatroom/${room.id}`} className="block group w-full">
                 <div className="relative bg-[var(--surface)]/80 backdrop-blur-sm border border-[var(--border)] group-hover:border-[var(--glow)]/80 transition-all w-full flex flex-col md:flex-row shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_25px_rgba(59,130,246,0.2)] overflow-hidden">
                   
                   {/* Decorative side bar */}
@@ -194,7 +235,7 @@ export default function Dashboard() {
                     <div className="absolute top-4 left-4 bg-[var(--surface)]/90 backdrop-blur border border-[var(--border)] px-3 py-1.5 flex items-center gap-2">
                        <span className="w-1.5 h-1.5 bg-[var(--glow)] rounded-full animate-pulse"></span>
                        <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--glow)]">
-                         {room.roleplay_type.replace('_', ' ')}
+                         {room.chat_type || 'Recreativo'}
                        </span>
                     </div>
 
@@ -249,7 +290,7 @@ export default function Dashboard() {
                   
                 </div>
               </Link>
-            ))}
+            )))}
           </div>
         )}
       </main>
@@ -282,6 +323,19 @@ export default function Dashboard() {
                   onChange={e => setNewRoomDesc(e.target.value)}
                   className="w-full h-24 bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-mono text-sm rounded-sm p-3 outline-none focus:border-[var(--glow)]/50 transition-colors resize-none custom-scrollbar"
                 ></textarea>
+              </div>
+              <div>
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)] mb-2">Categoría del Despliegue</label>
+                <select 
+                  value={newRoomType}
+                  onChange={e => setNewRoomType(e.target.value)}
+                  className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-mono text-sm rounded-sm p-3 outline-none focus:border-[var(--glow)]/50 transition-colors cursor-pointer mb-5"
+                >
+                  <option value="Recreativo">Recreativo</option>
+                  <option value="Off-rol">Off-rol</option>
+                  <option value="Evento">Evento</option>
+                  <option value="Misiones">Misiones</option>
+                </select>
               </div>
               <div className="mb-2">
                 <ImageUploader 
@@ -348,6 +402,19 @@ export default function Dashboard() {
                   onChange={e => setNewRoomDesc(e.target.value)}
                   className="w-full h-24 bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-mono text-sm rounded-sm p-3 outline-none focus:border-[var(--glow)]/50 transition-colors resize-none custom-scrollbar"
                 ></textarea>
+              </div>
+              <div>
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-[var(--text-muted)] mb-2">Categoría del Despliegue</label>
+                <select 
+                  value={newRoomType}
+                  onChange={e => setNewRoomType(e.target.value)}
+                  className="w-full bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] font-mono text-sm rounded-sm p-3 outline-none focus:border-[var(--glow)]/50 transition-colors cursor-pointer mb-5"
+                >
+                  <option value="Recreativo">Recreativo</option>
+                  <option value="Off-rol">Off-rol</option>
+                  <option value="Evento">Evento</option>
+                  <option value="Misiones">Misiones</option>
+                </select>
               </div>
               <div className="mb-2">
                 <ImageUploader 

@@ -13,6 +13,7 @@ export interface Chatroom {
   roleplay_type: RoleplayMode;
   chatters_ids: string[];
   masters_ids: string[];
+  chat_type: string;
   resources: any[];
   turns: any[];
   created_at: string;

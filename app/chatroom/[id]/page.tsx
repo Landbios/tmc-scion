@@ -1486,13 +1486,21 @@ export default function ChatroomPage() {
 
           {/* Top Right: Mode Indicator */}
           <div className="absolute top-6 right-6 z-20 flex flex-col items-end gap-2">
-            <div className="flex items-center gap-2 bg-[var(--surface)]/80 border border-[var(--border)] backdrop-blur-md px-4 py-2 rounded-sm shadow-lg">
-              <Clock size={12} className="text-[var(--glow)]" />
-              <span className="text-[10px] font-bold tracking-widest text-[var(--text)] uppercase">
-                {chatroomData?.roleplay_type === 'combat' ? 'Modo Combate' 
-                : chatroomData?.roleplay_type === 'turn_based' ? 'Roleplay por Turnos' 
-                : 'Roleplay Libre'}
-              </span>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-[var(--surface-alt)]/90 border border-[var(--border)] backdrop-blur-md px-3 py-1.5 rounded-sm shadow-sm">
+                <span className="w-1.5 h-1.5 bg-[var(--glow)] rounded-full animate-pulse"></span>
+                <span className="text-[9px] font-bold tracking-[0.2em] text-[var(--glow)] uppercase">
+                  {chatroomData?.chat_type || 'Recreativo'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 bg-[var(--surface)]/80 border border-[var(--border)] backdrop-blur-md px-4 py-2 rounded-sm shadow-lg">
+                <Clock size={12} className="text-[var(--glow)]" />
+                <span className="text-[10px] font-bold tracking-widest text-[var(--text)] uppercase">
+                  {chatroomData?.roleplay_type === 'combat' ? 'Modo Combate' 
+                  : chatroomData?.roleplay_type === 'turn_based' ? 'Roleplay por Turnos' 
+                  : 'Roleplay Libre'}
+                </span>
+              </div>
             </div>
             {chatroomData?.description && (
               <div className="bg-[var(--surface)]/80 border border-[var(--border)] backdrop-blur-md px-4 py-3 rounded-sm shadow-lg max-w-sm">
