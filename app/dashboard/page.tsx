@@ -36,6 +36,8 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('Explorar');
   const [newRoomType, setNewRoomType] = useState('Recreativo');
   const [searchQuery, setSearchQuery] = useState('');
+  const [rejectionNote, setRejectionNote] = useState('');
+  const [isReviewingId, setIsReviewingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchChatrooms();
@@ -149,7 +151,9 @@ export default function Dashboard() {
           <div className="flex flex-col gap-6 w-full sm:w-auto">
             {/* Tabs */}
             <div className="flex items-center bg-[var(--surface-alt)] border border-[var(--border-light)] p-1 rounded-sm self-start">
-               {['Explorar', 'Recreativo', 'Off-rol', 'Evento', 'Misiones'].map(tab => (
+               {['Explorar', 'Recreativo', 'Off-rol', 'Evento', 'Misiones', 
+                 ...(profile?.role && ['staff', 'superadmin'].includes(profile.role) ? ['Propuestas'] : [])
+               ].map(tab => (
                  <button
                    key={tab}
                    onClick={() => setActiveTab(tab)}
@@ -173,19 +177,17 @@ export default function Dashboard() {
                 />
               </div>
               
-              {/* Only Staff/Superadmins can create */}
-              {profile?.role && ['staff', 'superadmin'].includes(profile.role) && (
-                <button 
-                  onClick={() => {
-                    setNewRoomType('Recreativo');
-                    setIsCreateModalOpen(true);
-                  }}
-                  className="flex items-center gap-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white px-5 py-2.5 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)]"
-                >
-                  <Plus size={14} />
-                  Crear Sala
-                </button>
-              )}
+              {/* Only Staff/Superadmins can create, users propose */}
+              <button 
+                onClick={() => {
+                  setNewRoomType('Recreativo');
+                  setIsCreateModalOpen(true);
+                }}
+                className="flex items-center gap-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white px-5 py-2.5 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)]"
+              >
+                <Plus size={14} />
+                {profile?.role && ['staff', 'superadmin'].includes(profile.role) ? 'Crear Sala' : 'Proponer Sala'}
+              </button>
             </div>
           </div>
         </div>
@@ -195,29 +197,31 @@ export default function Dashboard() {
           <div className="flex justify-center py-20">
             <div className="text-[var(--glow)] animate-pulse font-mono uppercase tracking-widest text-sm text-glow">Cargando datos...</div>
           </div>
-        ) : (
-          <div className="flex flex-col gap-6 w-full max-w-5xl">
-            {chatrooms
-              .filter(room => {
-                const matchesTab = activeTab === 'Explorar' || room.chat_type === activeTab;
-                const matchesSearch = room.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                                     (room.description?.toLowerCase() || '').includes(searchQuery.toLowerCase());
-                return matchesTab && matchesSearch;
-              })
-              .length === 0 ? (
+        ) : (() => {
+          const filteredRooms = chatrooms.filter(room => {
+            const matchesTab = activeTab === 'Explorar' ? room.status === 'approved' : 
+                              activeTab === 'Propuestas' ? room.status === 'pending' :
+                              room.chat_type === activeTab && room.status === 'approved';
+            
+            // Special case: Creators see their own pending/rejected in 'Explorar' or matching tab
+            const isOwnProposal = room.creator_id === user?.id;
+            const shouldShowOwn = isOwnProposal && (activeTab === 'Explorar' || room.chat_type === activeTab);
+            
+            const finalMatchesTab = matchesTab || shouldShowOwn;
+            const matchesSearch = room.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                                 (room.description?.toLowerCase() || '').includes(searchQuery.toLowerCase());
+            return finalMatchesTab && matchesSearch;
+          });
+
+          return (
+            <div className="flex flex-col gap-6 w-full max-w-5xl">
+              {filteredRooms.length === 0 ? (
                 <div className="text-center py-20 border border-dashed border-[var(--border-light)] rounded-sm bg-[var(--surface-alt)]/50">
                   <p className="text-[var(--text-muted)] font-mono text-sm">No se encontraron salas en esta categoría.</p>
                 </div>
               ) : (
-                chatrooms
-                  .filter(room => {
-                    const matchesTab = activeTab === 'Explorar' || room.chat_type === activeTab;
-                    const matchesSearch = room.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                                         (room.description?.toLowerCase() || '').includes(searchQuery.toLowerCase());
-                    return matchesTab && matchesSearch;
-                  })
-                  .map((room) => (
-                    <Link key={room.id} href={`/chatroom/${room.id}`} className="block group w-full">
+                filteredRooms.map((room) => (
+                  <Link key={room.id} href={`/chatroom/${room.id}`} className="block group w-full">
                 <div className="relative bg-[var(--surface)]/80 backdrop-blur-sm border border-[var(--border)] group-hover:border-[var(--glow)]/80 transition-all w-full flex flex-col md:flex-row shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_25px_rgba(59,130,246,0.2)] overflow-hidden">
                   
                   {/* Decorative side bar */}
@@ -232,11 +236,20 @@ export default function Dashboard() {
                     )}
                     
                     {/* Roleplay type tag overlay */}
-                    <div className="absolute top-4 left-4 bg-[var(--surface)]/90 backdrop-blur border border-[var(--border)] px-3 py-1.5 flex items-center gap-2">
-                       <span className="w-1.5 h-1.5 bg-[var(--glow)] rounded-full animate-pulse"></span>
-                       <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--glow)]">
-                         {room.chat_type || 'Recreativo'}
-                       </span>
+                    <div className="absolute top-4 left-4 bg-[var(--surface)]/90 backdrop-blur border border-[var(--border)] px-3 py-1.5 flex flex-col gap-1 z-20">
+                       <div className="flex items-center gap-2">
+                         <span className="w-1.5 h-1.5 bg-[var(--glow)] rounded-full animate-pulse"></span>
+                         <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--glow)]">
+                           {room.chat_type || 'Recreativo'}
+                         </span>
+                       </div>
+                       {room.status !== 'approved' && (
+                         <div className={`text-[8px] font-bold uppercase tracking-widest px-1 py-0.5 border ${
+                           room.status === 'pending' ? 'text-yellow-500 border-yellow-500/30 bg-yellow-500/10' : 'text-red-500 border-red-500/30 bg-red-500/10'
+                         }`}>
+                           {room.status === 'pending' ? 'Pendiente' : 'Rechazado'}
+                         </div>
+                       )}
                     </div>
 
                     {/* Edit Button for Staff */}
@@ -264,7 +277,14 @@ export default function Dashboard() {
                       <div className="flex items-center gap-2 mb-2">
                         <span className="text-[10px] font-mono text-[var(--text-muted)] tracking-widest uppercase">SYS_CODE :: {room.id.substring(0,8)}</span>
                       </div>
-                      <h3 className="text-2xl sm:text-3xl font-bold text-[var(--text)] font-serif uppercase tracking-wider mb-4 group-hover:text-[var(--accent)] transition-colors">{room.title}</h3>
+                      <h3 className="text-2xl sm:text-3xl font-bold text-[var(--text)] font-serif uppercase tracking-wider mb-2 group-hover:text-[var(--accent)] transition-colors">{room.title}</h3>
+                      
+                      {room.status === 'rejected' && room.proposal_note && (
+                        <div className="mb-4 p-3 bg-red-500/10 border-l-2 border-red-500 text-[10px] font-mono text-red-400 italic">
+                           RECHAZADO: {room.proposal_note}
+                        </div>
+                      )}
+
                       <div className="bg-[var(--surface-alt)]/50 p-4 border-l-2 border-[var(--border-light)] font-mono text-[11px] text-[var(--text-muted)] leading-relaxed max-w-2xl">
                         {room.description || '>[DATOS_NO_ENCONTRADOS_O_CLASIFICADOS...]'}
                       </div>
@@ -283,16 +303,83 @@ export default function Dashboard() {
                       </div>
                       
                       <div className="text-[10px] font-bold tracking-widest uppercase text-[var(--text-muted)] group-hover:text-[var(--glow)] transition-colors flex items-center gap-2">
-                        Conectar Enlace <span className="text-lg">→</span>
+                        {room.status === 'approved' ? (
+                          <>Conectar Enlace <span className="text-lg">→</span></>
+                        ) : room.status === 'pending' ? (
+                          <span className="text-yellow-500/70 italic">[EVALUANDO...]</span>
+                        ) : (
+                          <span className="text-red-500/70 italic">[OPERACION_CANCELADA]</span>
+                        )}
                       </div>
                     </div>
+
+                    {/* Staff Review Actions */}
+                    {activeTab === 'Propuestas' && profile?.role && ['staff', 'superadmin'].includes(profile.role) && (
+                      <div className="absolute top-4 right-12 z-20 flex gap-2">
+                         {isReviewingId === room.id ? (
+                           <div className="flex flex-col gap-2 p-3 bg-[var(--surface-alt)] border border-[var(--border)] shadow-xl animate-in fade-in slide-in-from-top-2">
+                              <textarea 
+                                placeholder="Nota de rechazo (opcional)..."
+                                value={rejectionNote}
+                                onChange={e => setRejectionNote(e.target.value)}
+                                className="text-[10px] font-mono bg-[var(--bg)] border border-[var(--border)] p-2 w-48 h-16 outline-none focus:border-red-500"
+                              />
+                              <div className="flex gap-2 justify-end">
+                                <button 
+                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsReviewingId(null); }}
+                                  className="text-[9px] uppercase font-bold text-[var(--text-muted)]"
+                                >
+                                  Cancelar
+                                </button>
+                                <button 
+                                  onClick={async (e) => {
+                                     e.preventDefault();
+                                     e.stopPropagation();
+                                     await useChatroomsStore.getState().updateRoomStatus(room.id, 'rejected', rejectionNote);
+                                     setIsReviewingId(null);
+                                     setRejectionNote('');
+                                  }}
+                                  className="text-[9px] uppercase font-bold text-red-500"
+                                >
+                                  Confirmar Rechazo
+                                </button>
+                              </div>
+                           </div>
+                         ) : (
+                           <>
+                             <button 
+                               onClick={async (e) => {
+                                 e.preventDefault();
+                                 e.stopPropagation();
+                                 await useChatroomsStore.getState().updateRoomStatus(room.id, 'approved');
+                               }}
+                               className="bg-green-500/20 border border-green-500/50 hover:bg-green-500/40 text-green-400 px-3 py-1 text-[9px] font-bold uppercase tracking-widest transition-all"
+                             >
+                               Aprobar
+                             </button>
+                             <button 
+                               onClick={(e) => {
+                                 e.preventDefault();
+                                 e.stopPropagation();
+                                 setIsReviewingId(room.id);
+                               }}
+                               className="bg-red-500/20 border border-red-500/50 hover:bg-red-500/40 text-red-400 px-3 py-1 text-[9px] font-bold uppercase tracking-widest transition-all"
+                             >
+                               Rechazar
+                             </button>
+                           </>
+                         )}
+                      </div>
+                    )}
                   </div>
                   
                 </div>
               </Link>
-            )))}
-          </div>
-        )}
+                ))
+              )}
+            </div>
+          );
+        })()}
       </main>
 
       {/* Create Modal */}

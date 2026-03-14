@@ -20,6 +20,7 @@ import {
   Info,
   User,
   Plus,
+  PlusSquare,
   MessageSquare,
   ImagePlus,
   RefreshCw,
@@ -35,30 +36,88 @@ import ImageUploader from '@/components/ImageUploader';
 
 // --- Subcomponents ---
 
-const Message = memo(({ sender, time, text, color, isWhisper, targetName }: { sender: string, time: string, text: string, color?: string, isWhisper?: boolean, targetName?: string }) => (
-  <div className={`bg-[var(--surface-alt)] border ${isWhisper ? 'border-[var(--glow)] shadow-inner' : 'border-[var(--border-light)]'} rounded-sm p-3 relative`}>
-    <div className="flex justify-between items-baseline mb-1">
-      <div className="flex items-center gap-2">
-        <span className={`text-xs font-bold ${color || 'text-[var(--accent)]'}`}>{sender}</span>
-        {isWhisper && <span className="text-[9px] px-1.5 py-0.5 bg-[var(--glow)]/10 text-[var(--glow)] border border-[var(--glow)]/30 rounded-sm font-mono uppercase">Susurrando a {targetName || 'Alguien'}</span>}
+const Message = memo(({ sender, time, text, color, isWhisper, targetName, isGrouped, isCompact }: { sender: string, time: string, text: string, color?: string, isWhisper?: boolean, targetName?: string, isGrouped?: boolean, isCompact?: boolean }) => (
+  <div className={`
+    group relative transition-all duration-200
+    ${isWhisper ? 'bg-[var(--glow)]/[0.03]' : ''} 
+    ${isGrouped ? 'mt-0' : `${isCompact ? 'mt-3' : 'mt-5'}`}
+    ${isCompact ? 'px-2 py-0.5' : 'px-4 py-1'}
+  `}>
+    {/* Left Tactical Accent Bar */}
+    <div className={`
+      absolute left-0 top-0 bottom-0 w-[2px] opacity-40 group-hover:opacity-100 transition-opacity
+      ${isWhisper ? 'bg-[var(--glow)] shadow-[0_0_8px_var(--glow)]' : 'bg-[var(--border)]'}
+      ${isGrouped ? 'top-[-8px]' : 'top-2 rounded-t-full'}
+    `}></div>
+
+    {!isGrouped && (
+      <div className={`flex items-baseline gap-3 ${isCompact ? 'mb-0' : 'mb-1'}`}>
+        <span className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-black tracking-tighter uppercase ${color || 'text-[var(--accent)]'} drop-shadow-[0_0_4px_rgba(0,0,0,0.5)]`}>
+          {sender}
+        </span>
+        <div className="h-[1px] flex-1 bg-gradient-to-r from-[var(--border)]/30 to-transparent"></div>
+        <span className="text-[8px] font-mono opacity-30 uppercase tracking-[0.2em] font-bold">{time}</span>
       </div>
-      <span className="mono-label">{time}</span>
+    )}
+
+    <div className="relative flex gap-2 items-start">
+      <p className={`
+        ${isCompact ? 'text-[11px] leading-tight' : 'text-sm leading-relaxed'} 
+        ${isWhisper ? 'text-[var(--glow)] italic font-medium' : 'text-white/90'}
+        ${isGrouped && isCompact ? 'pl-2' : ''}
+        font-sans tracking-wide
+      `}>
+        {text}
+      </p>
+      {isGrouped && !isCompact && (
+        <span className="text-[7px] font-mono opacity-0 group-hover:opacity-20 absolute -left-10 top-1 uppercase font-bold transition-opacity">{time}</span>
+      )}
     </div>
-    <p className={`text-sm ${isWhisper ? 'text-[var(--glow)]/90 italic' : 'text-[var(--text)]'}`}>{text}</p>
+    
+    {isWhisper && !isGrouped && (
+      <div className="absolute -top-2 right-4 flex items-center gap-1">
+        <div className="w-1 h-1 bg-[var(--glow)] rounded-full animate-pulse"></div>
+        <span className="text-[7px] font-mono text-[var(--glow)] uppercase tracking-[0.3em] font-black">Secure Line</span>
+      </div>
+    )}
   </div>
 ));
 Message.displayName = 'Message';
 
-const DiceMessage = memo(({ sender, time, text, result, color }: { sender: string, time: string, text: string, result: string, color?: string }) => (
-  <div className="bg-[var(--surface-alt)] border border-[var(--border-light)] rounded-sm p-3">
-    <div className="flex justify-between items-baseline mb-1">
-      <span className={`text-xs font-bold ${color || 'text-[var(--accent)]'}`}>{sender}</span>
-      <span className="mono-label">{time}</span>
-    </div>
-    <div className="flex items-center justify-between mt-2">
-      <span className="text-sm text-[var(--text)]">{text}</span>
-      <div className="flex items-center gap-1.5 bg-[var(--surface)] border border-[var(--accent)]/30 px-2 py-1 rounded-sm text-xs font-mono">
-        <span className="text-[var(--accent)] font-bold">{result}</span>
+const DiceMessage = memo(({ sender, time, text, result, color, isGrouped, isCompact }: { sender: string, time: string, text: string, result: string, color?: string, isGrouped?: boolean, isCompact?: boolean }) => (
+  <div className={`
+    group relative transition-all duration-200
+    ${isGrouped ? 'mt-0' : `${isCompact ? 'mt-3' : 'mt-5'}`}
+    ${isCompact ? 'px-2 py-1' : 'px-4 py-2'}
+    bg-gradient-to-r from-[var(--accent)]/[0.03] to-transparent
+  `}>
+    {/* Left Tactical Accent Bar */}
+    <div className={`
+      absolute left-0 top-0 bottom-0 w-[2px] bg-[var(--accent)] opacity-40 group-hover:opacity-100 transition-opacity
+      ${isGrouped ? 'top-[-8px]' : 'top-2 rounded-t-full'}
+    `}></div>
+
+    {!isGrouped && (
+      <div className={`flex items-baseline gap-3 ${isCompact ? 'mb-0' : 'mb-1'}`}>
+        <span className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-extrabold tracking-tighter uppercase ${color || 'text-[var(--accent)]'} drop-shadow-[0_0_8px_var(--accent-hover)]`}>
+          {sender}
+        </span>
+        <div className="h-[1px] flex-1 bg-gradient-to-r from-[var(--accent)]/20 to-transparent"></div>
+        <span className="text-[8px] font-mono opacity-30 uppercase tracking-[0.2em] font-bold">{time}</span>
+      </div>
+    )}
+
+    <div className="flex items-center justify-between gap-4">
+      <span className={`${isCompact ? 'text-[11px]' : 'text-sm'} text-white/80 italic font-mono`}>{text}</span>
+      <div className={`
+        flex flex-col items-center justify-center 
+        bg-black/40 border border-[var(--accent)]/40 
+        ${isCompact ? 'w-8 h-8' : 'w-10 h-10'} 
+        rounded-sm rotate-45 group-hover:rotate-[135deg] transition-all duration-500
+      `}>
+        <span className={`text-[var(--glow)] font-black ${isCompact ? 'text-[10px]' : 'text-xs'} -rotate-45 group-hover:-rotate-[135deg] transition-all duration-500`}>
+          {result}
+        </span>
       </div>
     </div>
   </div>
@@ -155,6 +214,37 @@ export default function ChatroomPage() {
   const [diceSides, setDiceSides] = useState(100);
   
   const messages = useMessageStore(state => state.messages);
+  const [isHistoryCompact, setIsHistoryCompact] = useState(false);
+  const [isGroupingEnabled, setIsGroupingEnabled] = useState(true);
+
+  const processedMessages = useMemo(() => {
+    return messages.map((msg, index) => {
+      if (!isGroupingEnabled) return { ...msg, isGrouped: false };
+      
+      const prevMsg = messages[index - 1];
+      if (!prevMsg) return { ...msg, isGrouped: false };
+
+      const currentSender = msg.chatroom_characters?.name || msg.profiles?.username || 'Sistema';
+      const prevSender = prevMsg.chatroom_characters?.name || prevMsg.profiles?.username || 'Sistema';
+
+      const isSameSender = currentSender === prevSender;
+      const timeDiff = new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime();
+      const isCloseInTime = timeDiff < 5 * 60 * 1000; // 5 minutes
+
+      // Don't group if:
+      // - Different type of message (system / normal)
+      // - Different whisper target
+      // - Dice result involved
+      const isGroupable = isSameSender && isCloseInTime && 
+                        msg.is_system_message === prevMsg.is_system_message && 
+                        msg.is_dm_whisper === prevMsg.is_dm_whisper && 
+                        msg.target_user_id === prevMsg.target_user_id && 
+                        !msg.dice_result && !prevMsg.dice_result;
+
+      return { ...msg, isGrouped: isGroupable };
+    });
+  }, [messages, isGroupingEnabled]);
+
   const fetchMessages = useMessageStore(state => state.fetchMessages);
   const loadMoreMessages = useMessageStore(state => state.loadMoreMessages);
   const hasMoreMessages = useMessageStore(state => state.hasMoreMessages);
@@ -167,6 +257,17 @@ export default function ChatroomPage() {
   const [messageInput, setMessageInput] = useState('');
   const [selectedSpriteId, setSelectedSpriteId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Helper to get image URL for the active character
+  const activeVaultCharacter = useMemo(() => {
+    if (!activeChatroomCharacter) return null;
+    return vaultCharacters.find(v => v.id === activeChatroomCharacter.vault_character_id);
+  }, [vaultCharacters, activeChatroomCharacter]);
+
+  const activePortraitUrl = useMemo(() => {
+    if (activeChatroomCharacter?.name === 'TMC: Master') return null; // Could use profile image if added later
+    return activeVaultCharacter?.image_url;
+  }, [activeChatroomCharacter, activeVaultCharacter]);
   
   interface ChatroomResource {
     id: string;
@@ -519,9 +620,8 @@ export default function ChatroomPage() {
     let isMounted = true;
     const supabase = createClient();
 
-    // Fetch specific chatroom data safely inline
     const fetchChatroomData = async () => {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('chatrooms')
         .select('*, creator:profiles!chatrooms_creator_id_fkey(username, id)')
         .eq('id', id)
@@ -547,7 +647,6 @@ export default function ChatroomPage() {
     };
     fetchChatroomData();
 
-    // Fetch chatters for whisper targeting
     const fetchChattersForMaster = async () => {
       const { data } = await supabase.from('chatrooms').select('chatters_ids').eq('id', id).single();
       if(data && data.chatters_ids && data.chatters_ids.length > 0) {
@@ -557,7 +656,6 @@ export default function ChatroomPage() {
     };
     fetchChattersForMaster();
 
-    // Setup realtime subscription for resources and turns
     const subscription = supabase
       .channel(`chatroom-${id}-data`)
       .on(
@@ -570,22 +668,10 @@ export default function ChatroomPage() {
         },
         (payload) => {
           if (isMounted && payload.new) {
-            setChatroomData(prev => ({
+            setChatroomData(prev => prev ? ({
               ...prev,
-              id: payload.new.id,
-              title: payload.new.title,
-              description: payload.new.description,
-              background_url: payload.new.background_url,
-              creator_id: payload.new.creator_id,
-              masters_ids: payload.new.masters_ids || [],
-              chatters_ids: payload.new.chatters_ids || [],
-              chat_type: payload.new.chat_type || 'Recreativo',
-              roleplay_type: payload.new.roleplay_type || 'free_roleplay',
-              bgm_url: payload.new.bgm_url,
-              resources: payload.new.resources || [],
-              turns: payload.new.turns || [],
-              bgm_state: payload.new.bgm_state || { playing: false, time: 0, timestamp: null }
-            }));
+              ...payload.new
+            } as ChatroomData) : null);
           }
         }
       )
@@ -596,6 +682,25 @@ export default function ChatroomPage() {
       supabase.removeChannel(subscription);
     };
   }, [id, user]);
+  // Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsTurnOrderOpen(false);
+        setIsResourcesOpen(false);
+        setIsRoomDetailsOpen(false);
+        setIsHistoryOpen(false);
+        setIsAddCharacterModalOpen(false);
+        setIsSpriteModalOpen(false);
+        setIsEditStatusModalOpen(false);
+        setIsAddResourceModalOpen(false);
+        setIsManageTurnsModalOpen(false);
+        setIsDiceModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Initial Join Check & Messages Subscription
   useEffect(() => {
@@ -1427,6 +1532,26 @@ export default function ChatroomPage() {
         </div>
       )}
 
+      {/* Tactical UI Contours (HSR Style) */}
+      <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
+        {/* Top-Left Corner */}
+        <div className="absolute top-4 left-4 w-12 h-12 border-t-2 border-l-2 border-[var(--glow)]/40 after:absolute after:top-[-2px] after:left-[-2px] after:w-2 after:h-2 after:bg-[var(--glow)] shadow-[0_0_15px_rgba(59,130,246,0.1)]"></div>
+        <div className="absolute top-8 left-8 w-4 h-4 border-t border-l border-[var(--border)] opacity-30"></div>
+        
+        {/* Top-Right Corner */}
+        <div className="absolute top-4 right-4 w-12 h-12 border-t-2 border-r-2 border-[var(--border)] after:absolute after:top-[-2px] after:right-[-2px] after:w-2 after:h-2 after:bg-[var(--border)]"></div>
+        
+        {/* Bottom-Left Corner (Just above footer) */}
+        <div className="absolute bottom-36 left-4 w-12 h-12 border-b-2 border-l-2 border-[var(--border)] opacity-40"></div>
+        
+        {/* Bottom-Right Corner (Just above footer) */}
+        <div className="absolute bottom-36 right-4 w-12 h-12 border-b-2 border-r-2 border-[var(--glow)]/40 shadow-[0_0_15px_rgba(59,130,246,0.1)]"></div>
+
+        {/* Vertical Side Lines */}
+        <div className="absolute top-[20%] left-0 w-[1px] h-[60%] bg-gradient-to-b from-transparent via-[var(--border)] to-transparent opacity-20"></div>
+        <div className="absolute top-[20%] right-0 w-[1px] h-[60%] bg-gradient-to-b from-transparent via-[var(--border)] to-transparent opacity-20"></div>
+      </div>
+
       <div className="absolute inset-0 pointer-events-none z-0 grid-overlay"></div>
       
       {/* Top Bar */}
@@ -1630,9 +1755,28 @@ export default function ChatroomPage() {
           {/* History Drawer */}
           <div className={`absolute top-0 right-0 bottom-0 w-80 md:w-[400px] bg-[var(--surface)]/95 backdrop-blur-xl border-l border-[var(--border)] z-30 flex flex-col shadow-2xl transform transition-transform duration-300 ${isHistoryOpen ? 'translate-x-0' : 'translate-x-full'}`}>
             <div className="flex items-center justify-between p-5 border-b border-[var(--border)]">
-              <div className="flex items-center gap-2 text-[var(--glow)]">
-                <MessageSquare size={14} />
-                <h2 className="text-[10px] font-bold tracking-widest uppercase text-[var(--text)]">Historial de Chat</h2>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 text-[var(--glow)]">
+                  <MessageSquare size={14} />
+                  <h2 className="text-[10px] font-bold tracking-widest uppercase text-[var(--text)]">Historial</h2>
+                </div>
+                <div className="flex items-center gap-1.5 p-1 bg-[var(--surface-alt)] rounded-sm border border-[var(--border-light)]">
+                  <button 
+                    onClick={() => setIsGroupingEnabled(!isGroupingEnabled)}
+                    className={`p-1 rounded-sm transition-all ${isGroupingEnabled ? 'text-[var(--glow)] bg-[var(--glow)]/10' : 'text-[var(--text-muted)] hover:text-[var(--text)]'}`}
+                    title={isGroupingEnabled ? "Desactivar Agrupación" : "Activar Agrupación"}
+                  >
+                    <Plus size={10} className={isGroupingEnabled ? 'rotate-45 transition-transform' : 'transition-transform'} />
+                  </button>
+                  <div className="w-px h-3 bg-[var(--border)]"></div>
+                  <button 
+                    onClick={() => setIsHistoryCompact(!isHistoryCompact)}
+                    className={`p-1 rounded-sm transition-all ${isHistoryCompact ? 'text-[var(--accent)] bg-[var(--accent)]/10' : 'text-[var(--text-muted)] hover:text-[var(--text)]'}`}
+                    title={isHistoryCompact ? "Modo Detallado" : "Modo Compacto"}
+                  >
+                    <Maximize2 size={10} className={isHistoryCompact ? 'scale-75' : ''} />
+                  </button>
+                </div>
               </div>
               <button onClick={() => setIsHistoryOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text)]">
                 <X size={16} />
@@ -1654,15 +1798,15 @@ export default function ChatroomPage() {
                        </button>
                     </div>
                   )}
-                  {messages.map(msg => {
+                  {processedMessages.map(msg => {
                     const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     const senderName = msg.chatroom_characters?.name || msg.profiles?.username || 'Sistema';
                     const color = msg.is_system_message ? 'text-[var(--danger)]' : 'text-[var(--accent)]';
 
                     if (msg.dice_result) {
-                      return <DiceMessage key={msg.id} sender={senderName} time={time} text={msg.content} result={msg.dice_result.roll.toString()} color={color} />
+                      return <DiceMessage key={msg.id} sender={senderName} time={time} text={msg.content} result={msg.dice_result.roll.toString()} color={color} isGrouped={msg.isGrouped} isCompact={isHistoryCompact} />
                     }
-                    return <Message key={msg.id} sender={senderName} time={time} text={msg.content} color={color} isWhisper={msg.is_dm_whisper} targetName={msg.target_profile?.username} />
+                    return <Message key={msg.id} sender={senderName} time={time} text={msg.content} color={color} isWhisper={msg.is_dm_whisper} targetName={msg.target_profile?.username} isGrouped={msg.isGrouped} isCompact={isHistoryCompact} />
                   })}
                 </>
               )}
@@ -1853,144 +1997,145 @@ export default function ChatroomPage() {
           </div>
 
         </div>
-      </main>
+      </main>      <footer className="h-32 border-t border-[var(--border)] bg-[var(--surface)]/40 backdrop-blur-2xl flex items-center px-6 gap-8 z-20 relative shrink-0 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+        {/* Tactical Corner Accents */}
+        <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-[var(--border)]/30 z-10 pointer-events-none"></div>
 
-      {/* Bottom Bar (Input Area) */}
-      <footer className="h-32 border-t border-[var(--border)] bg-[var(--surface)] flex items-center px-6 gap-6 z-20 relative shrink-0">
-        
-        {/* Character Stats */}
+        {/* Pilot Status HUD - Pushed to the far left edge */}
         <button 
           onClick={handleOpenEditStatus}
-          className="flex items-center gap-4 bg-[var(--surface-alt)] hover:bg-[var(--surface)] border border-[var(--border-light)] hover:border-[var(--glow)]/50 p-3 rounded-sm min-w-[260px] shadow-inner transition-colors text-left group"
+          className="flex items-center gap-6 bg-gradient-to-r from-[var(--glow)]/10 to-transparent p-6 pl-10 -ml-6 rounded-r-lg border-l-[6px] border-[var(--glow)] min-w-[360px] relative group text-left transition-all hover:from-[var(--glow)]/20"
           title="Editar Estado (HP/Mana)"
         >
-          <div className="relative w-16 h-16 rounded-sm overflow-hidden border border-[var(--surface)] bg-[var(--border)] group-hover:border-[var(--glow)]/30 transition-colors">
-             <User size={24} className="text-[var(--text-muted)] absolute inset-0 m-auto" />
-          </div>
-          <div className="flex-1 flex flex-col justify-center gap-1.5">
-            {/* Character Name */}
-            <div className="text-xs font-bold text-[var(--text)] uppercase tracking-wider mb-0.5 line-clamp-1">{activeChatroomCharacter?.name}</div>
+          {/* Scanline Effect */}
+          <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10 pointer-events-none"></div>
+          <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
+          
+          {/* Character Portrait with Tactical Frame */}
+          <div className="relative w-24 h-24 shrink-0 -mt-2 z-10 transition-transform duration-500 hover:scale-110">
+            {/* Outer Glow Diamonds */}
+            <div className="absolute inset-0 border-2 border-[var(--glow)]/30 rotate-45 group-hover:rotate-[135deg] transition-all duration-700 bg-black/60 shadow-[0_0_25px_rgba(59,130,246,0.2)]"></div>
+            <div className="absolute inset-1.5 border border-white/20 rotate-45"></div>
             
-            {/* HP */}
-            <div className="flex flex-col gap-1">
-              <div className="flex justify-between items-center text-[9px] font-mono">
-                <span className="text-[var(--danger)] font-bold">HP</span>
-                <span className="text-[var(--text-muted)]">{activeChatroomCharacter?.hp}/{activeChatroomCharacter?.max_hp}</span>
-              </div>
-              <div className="h-1 w-full bg-[var(--border)] rounded-none overflow-hidden">
-                <div className="h-full bg-[var(--danger)] w-full shadow-[0_0_5px_var(--danger)]" style={{ width: `${Math.max(0, Math.min(100, ((activeChatroomCharacter?.hp || 0) / (activeChatroomCharacter?.max_hp || 1)) * 100))}%` }}></div>
-              </div>
+            {/* Diamond Clipped Portrait */}
+            <div 
+              className="absolute inset-[3px] bg-gradient-to-br from-black/90 to-[var(--surface-alt)] overflow-hidden z-20 shadow-inner"
+              style={{ clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' }}
+            >
+               {activePortraitUrl ? (
+                 <Image 
+                   src={activePortraitUrl} 
+                   alt={activeChatroomCharacter?.name || 'Character'} 
+                   fill 
+                   className="object-cover brightness-110 contrast-125 saturate-[1.2] transition-transform duration-700 group-hover:scale-110" 
+                 />
+               ) : (
+                 <div className="w-full h-full flex items-center justify-center bg-white/5">
+                    <User size={32} className="text-white/20" />
+                 </div>
+               )}
             </div>
-            {/* Mana */}
-            <div className="flex flex-col gap-1">
-              <div className="flex justify-between items-center text-[9px] font-mono">
-                <span className="text-[var(--glow)] font-bold">MANA</span>
-                <span className="text-[var(--text-muted)]">{activeChatroomCharacter?.mana}/{activeChatroomCharacter?.max_mana}</span>
-              </div>
-              <div className="h-1 w-full bg-[var(--border)] rounded-none overflow-hidden">
-                <div className="h-full bg-[var(--glow)] w-full shadow-[0_0_5px_var(--glow)]" style={{ width: `${Math.max(0, Math.min(100, ((activeChatroomCharacter?.mana || 0) / (activeChatroomCharacter?.max_mana || 1)) * 100))}%` }}></div>
-              </div>
-            </div>
+            {/* Corner Status Light */}
+            <div className="absolute -top-1 -left-1 w-2 h-2 bg-[var(--glow)] rounded-full shadow-[0_0_15px_var(--glow)] animate-pulse z-30"></div>
           </div>
-          {/* Status Badge */}
-          {activeChatroomCharacter?.advantage_status && activeChatroomCharacter.advantage_status !== 'normal' && (
-            <div className="h-full flex flex-col justify-start">
-              <div className="inline-flex items-center justify-center px-1.5 py-0.5 bg-[var(--danger)]/10 border border-[var(--danger)]/30 rounded-sm text-[8px] text-[var(--danger)] font-bold uppercase tracking-widest">
-                {activeChatroomCharacter.advantage_status}
-              </div>
-            </div>
-          )}
+
+          <div className="flex-1 flex flex-col gap-3 relative">
+             <div className="flex justify-between items-end border-b border-white/5 pb-1">
+                <div className="text-[10px] font-mono text-[var(--glow)] uppercase tracking-[0.25em] font-black drop-shadow-[0_0_8px_var(--glow)]">
+                  {activeChatroomCharacter?.name?.substring(0, 18)}
+                </div>
+                {activeChatroomCharacter?.advantage_status && activeChatroomCharacter.advantage_status !== 'normal' && (
+                  <div className="text-[7px] bg-[var(--danger)]/20 text-[var(--danger)] px-1.5 py-0.5 rounded-sm border border-[var(--danger)]/40 font-bold uppercase tracking-tighter">
+                    {activeChatroomCharacter.advantage_status}
+                  </div>
+                )}
+             </div>
+             
+             <div className="space-y-2">
+               {/* Vital Signs (HP) */}
+               <div className="space-y-1">
+                  <div className="flex justify-between items-center text-[7px] font-mono font-black tracking-widest leading-none">
+                     <span className="text-[var(--danger)]/80">VITAL_SIGNS</span>
+                     <span className="text-white/60 font-medium">{activeChatroomCharacter?.hp} / {activeChatroomCharacter?.max_hp}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-black/40 border border-white/5 p-[1px] flex items-center">
+                     <div className="h-full bg-[var(--danger)] transition-all duration-500 shadow-[0_0_8px_var(--danger)]" style={{ width: `${Math.max(0, Math.min(100, ((activeChatroomCharacter?.hp || 0) / (activeChatroomCharacter?.max_hp || 1)) * 100))}%` }}></div>
+                     {/* Segmented Grid Overlay */}
+                     <div className="absolute inset-x-0 h-1.5 opacity-20 pointer-events-none flex gap-[4px] px-[1px]">
+                        {[...Array(10)].map((_, i) => <div key={i} className="flex-1 border-r border-black/50 last:border-0 h-full"></div>)}
+                     </div>
+                  </div>
+               </div>
+               {/* Bio Energy (Mana) */}
+               <div className="space-y-1">
+                  <div className="flex justify-between items-center text-[7px] font-mono font-black tracking-widest leading-none">
+                     <span className="text-[var(--glow)]/80">BIO_ENERGY</span>
+                     <span className="text-white/60 font-medium">{activeChatroomCharacter?.mana} / {activeChatroomCharacter?.max_mana}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-black/40 border border-white/5 p-[1px] flex items-center relative">
+                     <div className="h-full bg-[var(--glow)] transition-all duration-500 shadow-[0_0_8px_var(--glow)]" style={{ width: `${Math.max(0, Math.min(100, ((activeChatroomCharacter?.mana || 0) / (activeChatroomCharacter?.max_mana || 1)) * 100))}%` }}></div>
+                     {/* Segmented Grid Overlay */}
+                     <div className="absolute inset-0 h-1.5 opacity-20 pointer-events-none flex gap-[4px] px-[1px]">
+                        {[...Array(10)].map((_, i) => <div key={i} className="flex-1 border-r border-black/50 last:border-0 h-full"></div>)}
+                     </div>
+                  </div>
+               </div>
+             </div>
+          </div>
         </button>
 
-        {/* Input Area */}
-        <form className="flex-1 flex flex-col gap-3 h-full py-4" onSubmit={handleSendMessage}>
-          <div className="flex items-center gap-3">
-            {/* Expression / Sprite Selection */}
-            {activeCharacterSprites.length > 0 && (
-              <div className="relative flex items-center gap-1">
-                <div className="relative">
-                  <select 
-                    value={selectedSpriteId || activeCharacterSprites[0]?.id || ''}
-                    onChange={(e) => setSelectedSpriteId(e.target.value)}
-                    className="bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--text)] text-[10px] uppercase tracking-wider font-bold rounded-sm px-3 py-1.5 outline-none focus:border-[var(--glow)]/50 appearance-none min-w-[200px] pr-8 cursor-pointer hover:bg-[var(--border)] transition-colors"
-                  >
-                  {activeCharacterSprites.map(sprite => (
-                      <option key={sprite.id} value={sprite.id}>{sprite.name}</option>
-                    ))}
-                  </select>
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--text-muted)]">
-                     <User size={12} />
-                  </div>
-                </div>
-                {selectedSpriteId && (
-                  <button
-                     type="button"
-                     onClick={() => openEditSprite(activeCharacterSprites.find(s => s.id === selectedSpriteId)!)}
-                     className="p-1.5 text-[var(--text-muted)] hover:text-[var(--glow)] hover:bg-[var(--glow)]/10 rounded-sm transition-colors border border-transparent"
-                     title="Editar o Eliminar este Sprite"
-                  >
-                     <Pencil size={14} />
-                  </button>
-                )}
-              </div>
-            )}
-            
-            <button 
-              type="button"
-              onClick={openAddSprite}
-              className="px-2 py-1.5 bg-[var(--surface-alt)] border border-[var(--border-light)] hover:border-[var(--glow)]/50 hover:text-[var(--glow)] text-[var(--text-muted)] rounded-sm transition-colors"
-              title="Añadir un nuevo Sprite"
-            >
-               <ImagePlus size={14} />
-            </button>
-
-            {/* Target Selector (Master Only) */}
-            {activeChatroomCharacter?.name === 'TMC: Master' && (
-               <div className="relative animate-in fade-in slide-in-from-bottom-2">
+        {/* Command Input Area */}
+        <form className="flex-1 flex flex-col gap-2 h-full py-4 relative group" onSubmit={handleSendMessage}>
+           <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-px bg-black/40 border border-white/10 rounded-sm p-0.5">
+                 {/* Character Swapper */}
                  <select 
-                     value={selectedTargetUserId || ''} 
-                     onChange={e => setSelectedTargetUserId(e.target.value)}
-                     className="bg-[var(--surface-alt)] border border-[var(--glow)]/30 text-[var(--glow)] text-[10px] uppercase tracking-wider font-bold rounded-sm px-3 py-1.5 outline-none focus:border-[var(--glow)] appearance-none min-w-[200px] pr-8 cursor-pointer hover:bg-[var(--glow)]/10 transition-colors shadow-[0_0_10px_rgba(59,130,246,0.1)] truncate"
+                   value={activeChatroomCharacter.id}
+                   onChange={(e) => setActiveCharacter(e.target.value)}
+                   className="bg-transparent text-[8px] font-mono font-black text-[var(--accent)] hover:bg-white/5 px-2 py-1 outline-none appearance-none cursor-pointer uppercase transition-all tracking-tighter"
                  >
-                     <option value="">Narrativa General</option>
-                     {chatters.map(c => <option key={c.id} value={c.id}>Susurro: {c.username}</option>)}
+                   {myChatroomCharacters.map(char => (
+                     <option key={char.id} value={char.id} className="bg-[var(--bg)]">{char.name}</option>
+                   ))}
                  </select>
-                 <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--glow)]">
-                    <User size={12} />
-                 </div>
-               </div>
-            )}
-
-            {/* Character Switcher */}
-            <div className="relative">
-              <select 
-                value={activeChatroomCharacter.id}
-                onChange={(e) => setActiveCharacter(e.target.value)}
-                className="bg-[var(--surface-alt)] border border-[var(--border-light)] text-[var(--accent)] text-[10px] uppercase tracking-wider font-bold rounded-sm px-3 py-1.5 outline-none focus:border-[var(--glow)]/50 appearance-none min-w-[150px] pr-8 cursor-pointer hover:bg-[var(--border)] transition-colors"
-              >
-                {myChatroomCharacters.map(char => (
-                  <option key={char.id} value={char.id}>{char.name}</option>
-                ))}
-              </select>
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--text-muted)]">
-                 <User size={12} />
+                 <div className="w-px h-3 bg-white/10 mx-1"></div>
+                 {/* Sprite Swapper */}
+                 {activeCharacterSprites.length > 0 && (
+                    <select 
+                      value={selectedSpriteId || activeCharacterSprites[0]?.id || ''}
+                      onChange={(e) => setSelectedSpriteId(e.target.value)}
+                      className="bg-transparent text-[8px] font-mono font-black text-white/50 hover:bg-white/5 px-2 py-1 outline-none appearance-none cursor-pointer uppercase transition-all tracking-tighter max-w-[120px] truncate"
+                    >
+                      {activeCharacterSprites.map(sprite => (
+                        <option key={sprite.id} value={sprite.id} className="bg-[var(--bg)]">{sprite.name}</option>
+                      ))}
+                    </select>
+                 )}
               </div>
-            </div>
+              
+              {/* Target Selector (Master Only) */}
+              {activeChatroomCharacter?.name === 'TMC: Master' && (
+                 <div className="flex items-center gap-px bg-black/40 border border-[var(--glow)]/30 rounded-sm p-0.5 animate-in fade-in slide-in-from-bottom-2">
+                    <span className="text-[7px] font-mono font-black text-[var(--glow)] px-1.5 uppercase">TARGET_ID:</span>
+                    <select 
+                        value={selectedTargetUserId || ''} 
+                        onChange={e => setSelectedTargetUserId(e.target.value)}
+                        className="bg-transparent text-[8px] font-mono font-black text-[var(--glow)] hover:bg-[var(--glow)]/5 hover:text-white px-2 py-1 outline-none appearance-none cursor-pointer uppercase transition-all tracking-tighter max-w-[120px] truncate"
+                    >
+                        <option value="" className="bg-[var(--bg)]">BROADCAST_ALL</option>
+                        {chatters.map(c => <option key={c.id} value={c.id} className="bg-[var(--bg)]">WHISPER: {c.username}</option>)}
+                    </select>
+                 </div>
+              )}
 
-            <button 
-              type="button"
-              onClick={() => {
-                if (user && vaultCharacters.length === 0) fetchVaultCharacters(user.id);
-                setIsAddCharacterModalOpen(true);
-              }}
-              className="px-2 py-1.5 bg-[var(--surface-alt)] border border-[var(--border-light)] hover:border-[var(--glow)]/50 hover:text-[var(--glow)] text-[var(--text-muted)] rounded-sm transition-colors"
-              title="Añadir otro personaje"
-            >
-               <Plus size={14} />
-            </button>
-          </div>
+              <div className="flex items-center gap-2 ml-2">
+                 <button type="button" onClick={openAddSprite} className="p-1 text-white/20 hover:text-[var(--glow)] transition-colors" title="Añadir Sprite"><ImagePlus size={12} /></button>
+                 <button type="button" onClick={() => setIsAddCharacterModalOpen(true)} className="p-1 text-white/20 hover:text-[var(--accent)] transition-colors" title="Gestionar Squad"><PlusSquare size={12} /></button>
+              </div>
+           </div>
 
-          <div className="flex-1 relative flex items-end gap-2">
+           <div className="flex-1 relative">
+              <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-[var(--glow)]/40 pointer-events-none"></div>
               <textarea 
                 value={messageInput}
                 onChange={e => setMessageInput(e.target.value)}
@@ -2000,53 +2145,57 @@ export default function ChatroomPage() {
                     handleSendMessage(e);
                   }
                 }}
-                className={`w-full h-full bg-[var(--surface-alt)] border ${activeChatroomCharacter?.name === 'TMC: Master' && selectedTargetUserId ? 'border-[var(--glow)] focus:ring-[var(--glow)]' : 'border-[var(--border-light)] focus:ring-[var(--glow)]/50'} rounded-sm p-3 pr-12 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] resize-none outline-none focus:ring-1 custom-scrollbar transition-all font-mono`}
-                placeholder={activeChatroomCharacter?.name === 'TMC: Master' && selectedTargetUserId ? `Escribiendo susurro oculto...` : "Escribe tu mensaje... (Enter para enviar)"}
+                className={`w-full h-full bg-black/30 border ${activeChatroomCharacter?.name === 'TMC: Master' && selectedTargetUserId ? 'border-[var(--glow)]/40 focus:ring-[var(--glow)]/20' : 'border-white/5 focus:border-[var(--glow)]/30'} rounded-sm p-3 text-sm text-white/90 placeholder:text-white/5 resize-none outline-none transition-all font-sans custom-scrollbar`}
+                placeholder={activeChatroomCharacter?.name === 'TMC: Master' && selectedTargetUserId ? ">>> AWAITING SECURE LINK INPUT..." : ">>> ENTER TACTICAL COMMAND..."}
               ></textarea>
-              <button type="submit" className="absolute right-2 bottom-2 p-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-sm transition-colors shadow-[0_0_10px_var(--glow)]">
-                <Send size={14} />
+              <button type="submit" className="absolute right-3 bottom-3 p-2.5 bg-[var(--accent)]/10 border border-[var(--accent)] hover:bg-[var(--accent)] text-white hover:text-black rounded-sm transition-all shadow-[0_0_15px_rgba(59,130,246,0.1)] group overflow-hidden">
+                <Send size={14} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
               </button>
-          </div>
+           </div>
         </form>
 
-        {/* Paneles (Drawers) */}
-        <div className="flex flex-col gap-2 min-w-[140px] h-full py-4 justify-end border-r border-[var(--border)] pr-6">
-          <div className="text-[9px] font-bold tracking-[0.2em] text-[var(--text-muted)] uppercase text-center mb-0.5">PÁNELES</div>
-          <div className="flex justify-between gap-2">
-            <button 
-              onClick={() => { setIsHistoryOpen(!isHistoryOpen); setIsTurnOrderOpen(false); setIsResourcesOpen(false); }} 
-              className={`flex-1 h-9 rounded-sm flex items-center justify-center transition-all border ${isHistoryOpen ? 'bg-[var(--accent)] border-[var(--glow)] text-white shadow-[0_0_10px_var(--glow)]' : 'bg-[var(--surface-alt)] border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--glow)] hover:border-[var(--glow)]/50'}`}
-              title="Historial de Chat"
-            >
-              <MessageSquare size={14} />
-            </button>
-            <button 
-              onClick={() => { setIsResourcesOpen(!isResourcesOpen); setIsTurnOrderOpen(false); setIsHistoryOpen(false); }} 
-              className={`flex-1 h-9 rounded-sm flex items-center justify-center transition-all border ${isResourcesOpen ? 'bg-[var(--accent)] border-[var(--glow)] text-white shadow-[0_0_10px_var(--glow)]' : 'bg-[var(--surface-alt)] border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--glow)] hover:border-[var(--glow)]/50'}`}
-              title="Recursos"
-            >
-              <FolderOpen size={14} />
-            </button>
-            <button 
-              onClick={() => { setIsTurnOrderOpen(!isTurnOrderOpen); setIsResourcesOpen(false); setIsHistoryOpen(false); }} 
-              className={`flex-1 h-9 rounded-sm flex items-center justify-center transition-all border ${isTurnOrderOpen ? 'bg-[var(--accent)] border-[var(--glow)] text-white shadow-[0_0_10px_var(--glow)]' : 'bg-[var(--surface-alt)] border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--glow)] hover:border-[var(--glow)]/50'}`}
-              title="Orden de Turnos"
-            >
-              <Clock size={14} />
-            </button>
-          </div>
-        </div>
+        {/* Tactical Control Bridge */}
+        <div className="flex items-center gap-5 h-full py-4 pl-5 border-l border-white/5">
+           {/* Systems Toggles */}
+           <div className="grid grid-cols-3 gap-1.5">
+              {[
+                { icon: MessageSquare, state: isHistoryOpen, set: setIsHistoryOpen, label: 'LOGS' },
+                { icon: FolderOpen, state: isResourcesOpen, set: setIsResourcesOpen, label: 'DATA' },
+                { icon: Clock, state: isTurnOrderOpen, set: setIsTurnOrderOpen, label: 'SEQ' }
+              ].map((btn, i) => (
+                <button 
+                  key={i}
+                  onClick={() => { 
+                    const newState = !btn.state;
+                    setIsTurnOrderOpen(false); setIsResourcesOpen(false); setIsHistoryOpen(false);
+                    btn.set(newState);
+                  }}
+                  className={`w-11 h-11 flex flex-col items-center justify-center rounded-sm border transition-all ${btn.state ? 'bg-[var(--glow)]/20 border-[var(--glow)] text-[var(--glow)] shadow-[0_0_15px_rgba(59,130,246,0.2)]' : 'bg-black/40 border-white/5 text-white/30 hover:text-white/80 hover:border-white/20'}`}
+                >
+                  <btn.icon size={16} />
+                  <span className="text-[6px] font-mono mt-1 font-black tracking-tighter">{btn.label}</span>
+                </button>
+              ))}
+           </div>
 
-        {/* Actions */}
-        <div className="flex flex-col gap-3 min-w-[160px] h-full py-4 justify-end">
-          <button onClick={() => setIsDiceModalOpen(true)} className="flex items-center justify-center gap-2 bg-transparent hover:bg-[var(--accent)]/10 border border-[var(--accent)]/50 text-[var(--accent)] px-4 py-2.5 rounded-sm text-[10px] font-bold uppercase tracking-widest transition-all shadow-[0_0_10px_rgba(59,130,246,0.05)] hover:shadow-[0_0_15px_rgba(59,130,246,0.15)]">
-            <Dices size={14} />
-            Tirar Dado
-          </button>
-          <button onClick={handlePassTurn} className="flex items-center justify-center gap-2 bg-transparent hover:bg-[var(--border)] border border-[var(--border-light)] text-[var(--text)] px-4 py-2.5 rounded-sm text-[10px] font-bold uppercase tracking-widest transition-colors hover:text-[var(--glow)]">
-            <SkipForward size={14} />
-            Pasar Turno
-          </button>
+           {/* Combat Actions */}
+           <div className="flex flex-col gap-2 h-full justify-center">
+              <button 
+                onClick={() => setIsDiceModalOpen(true)} 
+                className="flex items-center gap-3 bg-black/60 border border-[var(--glow)]/40 hover:border-[var(--glow)] px-5 py-2.5 rounded-sm text-[10px] font-black uppercase text-[var(--glow)] transition-all group overflow-hidden relative shadow-[0_0_15px_rgba(59,130,246,0.1)]"
+              >
+                 <div className="absolute inset-x-0 h-[100%] top-full bg-[var(--glow)] group-hover:top-0 transition-all duration-300 opacity-20"></div>
+                 <Dices size={16} className="relative z-10" />
+                 <span className="relative z-10">Deploy Dice</span>
+              </button>
+              <button 
+                onClick={handlePassTurn} 
+                className="flex items-center gap-3 bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/30 px-5 py-2.5 rounded-sm text-[10px] font-black uppercase text-white/30 hover:text-white transition-all"
+              >
+                 <SkipForward size={16} />
+                 <span>Cycle Phase</span>
+              </button>
+           </div>
         </div>
       </footer>
 
